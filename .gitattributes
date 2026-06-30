@@ -1,0 +1,20 @@
+* text=auto
+
+*.c text eol=lf
+*.h text eol=lf
+*.s text eol=lf
+*.ld text eol=lf
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf
+*.ioc text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
+
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+
