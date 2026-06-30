@@ -1,4 +1,4 @@
-# Embedded Motor And Servo Study
+# Embedded Study
 
 这是一个嵌入式电机和舵机学习总仓库，用来保存近期调试过的 STM32 工程。
 
@@ -50,4 +50,3 @@ PWM 舵机测试工程。
 - 每个子工程保留了 CubeMX/CLion/CMake 相关源码和配置。
 - 构建目录、IDE 缓存和编译产物没有放进仓库。
 - STM32CubeMX 工程如果重新生成代码，建议先确认 `USER CODE BEGIN/END` 中的用户代码没有被覆盖。
-
