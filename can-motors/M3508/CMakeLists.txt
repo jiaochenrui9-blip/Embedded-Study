@@ -33,6 +33,8 @@ enable_language(C ASM)
 
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME}
+    Core/Src/Axis.c
+    Core/Inc/Axis.h
     Core/Src/M3508.c
     Core/Inc/M3508.h
     Core/Src/can_bus.c

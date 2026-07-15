@@ -22,56 +22,18 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "M3508.h"
-#include "PID.h"
+#include "Axis.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-/* 自动锁存“大角度回位途中第一次停顿”时的控制状态。 */
-typedef struct
-{
-  volatile uint8_t valid;
-  volatile uint32_t tick;
-  volatile float position_degree;
-  volatile float position_error;
-  volatile float target_speed_rpm;
-  volatile int16_t actual_speed_rpm;
-  volatile int16_t current_command;
-  volatile int16_t feedback_current;
-  volatile float speed_integral;
-} Motor1_StallSnapshotTypeDef;
+
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-/* 1号M3508位置-速度串级控制参数：首次上电使用较小P项和限流。 */
-#define M3508_SPEED_CONTROL_PERIOD_MS     1U
-#define M3508_POSITION_CONTROL_PERIOD_MS  5U
-#define M3508_OFFLINE_TIMEOUT_MS         100U
-
-/* M3508反馈是电机转子侧数据，减速箱减速比为3591:187。 */
-#define M3508_REDUCTION_RATIO         (3591.0f / 187.0f)
-#define M3508_ENCODER_COUNTS_PER_REV  8192.0f
-
-/* 位置环输入为输出轴角度，输出为电机转子侧目标转速。 */
-#define M3508_POSITION_TARGET_DEG       0.0f
-#define M3508_POSITION_KP               15.0f
-#define M3508_POSITION_KI                0.0f
-#define M3508_POSITION_KD                0.0f
-#define M3508_POSITION_SPEED_LIMIT     300.0f
-#define M3508_POSITION_DEADBAND_DEG      0.2f
-
-/* 速度环输入为电机转子侧转速，输出为C620电流指令。 */
-#define M3508_SPEED_KP                   3.0f
-#define M3508_SPEED_KI                   0.02f
-#define M3508_SPEED_KD                   0.0f
-#define M3508_PID_CURRENT_LIMIT       1500.0f
-#define M3508_SPEED_INTEGRAL_LIMIT   30000.0f
-#define M3508_PID_INTEGRAL_LIMIT     50000.0f
-#define M3508_FRICTION_FF_CURRENT          180
-#define M3508_FRICTION_FF_MAX_SPEED_RPM     20
-#define M3508_STALL_MOVING_SPEED_RPM       20
-#define M3508_STALL_STOP_SPEED_RPM          2
+/* 主循环每1ms更新一次轴控制并发送CAN电流。 */
+#define AXIS_CONTROL_PERIOD_MS 1U
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -90,35 +52,11 @@ static M3508_ManagerTypeDef m3508_manager;
 /* 8个实际电机对象，数组下标0~7对应电机编号1~8。 */
 static M3508_MotorTypeDef motors[M3508_MOTOR_COUNT];
 
-/* 主循环读取到的稳定反馈副本，便于后续PID使用和调试器观察。 */
-static M3508_FeedbackTypeDef motor_feedback_snapshot[M3508_MOTOR_COUNT];
-
-/* 运行状态变量，可直接在调试器中观察。 */
-
+/* 8台电机各自对应一个位置轴，下标与motors数组一致。 */
+static Axis_TypeDef axes[M3508_MOTOR_COUNT];
 static volatile HAL_StatusTypeDef motor_tx_status = HAL_OK;
-static volatile uint8_t motor_online[M3508_MOTOR_COUNT];
 
-/* 上一次执行速度环和位置环的时间；HAL的SysTick每1ms更新一次。 */
-static uint32_t last_speed_control_tick = 0U;
-static uint32_t last_position_control_tick = 0U;
-
-/* 1号电机的位置PID和速度PID；以后控制多台电机时可以改成PID数组。 */
-static PID_TypeDef ID_1_M3508;
-static PID_TypeDef position_PID_1_M3508;
-
-/* 调试器可直接观察串级控制的中间量和最终电流指令。 */
-static volatile float motor1_pid_output = 0.0f;
-static volatile int16_t motor1_current_command = 0;
-static volatile float motor1_position_degree = 0.0f;
-static volatile float motor1_position_error = 0.0f;
-static volatile float motor1_target_speed_rpm = 0.0f;
-static float motor1_previous_position_error = 0.0f;
-static int32_t motor1_position_zero_encoder = 0;
-static uint8_t motor1_position_reference_ready = 0U;
-
-/* 仅用于调参，不参与控制输出。 */
-static volatile Motor1_StallSnapshotTypeDef motor1_stall_snapshot = {0};
-static uint8_t motor1_return_motion_detected = 0U;
+static uint32_t last_axis_control_tick = 0U;
 
 /* USER CODE END PV */
 
@@ -133,13 +71,6 @@ static void MX_USART6_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
-/* 将转子侧编码器增量换算成减速箱输出轴角度，单位为度。 */
-static float M3508_EncoderToOutputDegree(int32_t encoder_delta)
-{
-  return ((float)encoder_delta * 360.0f) /
-         (M3508_ENCODER_COUNTS_PER_REV * M3508_REDUCTION_RATIO);
-}
 
 /* USER CODE END 0 */
 
@@ -182,47 +113,25 @@ int main(void)
     Error_Handler();
   }
 
-  /* 第二步：把1~8号电机对象逐个注册进管理器。 */
+  /* 第二步：注册1~8号电机，并为每台电机初始化一个位置轴。 */
   for (uint8_t motor_id = 1U; motor_id <= M3508_MOTOR_COUNT; ++motor_id)
   {
+    const uint8_t index = motor_id - 1U;
+
     if (M3508_Manager_RegisterMotor(&m3508_manager,
-                                    &motors[motor_id - 1U],
+                                    &motors[index],
                                     motor_id) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    if (Axis_Init(&axes[index], &motors[index]) != HAL_OK)
     {
       Error_Handler();
     }
   }
 
-  /*
-   * 第三步：初始化1号电机的位置PID和速度PID。
-   * 位置PID输出目标转速，速度PID输出C620电流指令。
-   */
-  PID_Init(&ID_1_M3508,
-           M3508_SPEED_KP,
-           M3508_SPEED_KI,
-           M3508_SPEED_KD,
-           -M3508_PID_CURRENT_LIMIT,
-           M3508_PID_CURRENT_LIMIT,
-           -M3508_SPEED_INTEGRAL_LIMIT,
-           M3508_SPEED_INTEGRAL_LIMIT);
-  PID_Init(&position_PID_1_M3508,
-           M3508_POSITION_KP,
-           M3508_POSITION_KI,
-           M3508_POSITION_KD,
-           -M3508_POSITION_SPEED_LIMIT,
-           M3508_POSITION_SPEED_LIMIT,
-           -M3508_PID_INTEGRAL_LIMIT,
-           M3508_PID_INTEGRAL_LIMIT);
-  PID_SetTarget(&position_PID_1_M3508, M3508_POSITION_TARGET_DEG);
-  PID_SetTarget(&ID_1_M3508, 0.0f);
-
-  /* 收到有效反馈前保持0电流，避免电机在CAN尚未正常时突然动作。 */
-  if (M3508_Motor_SetCurrent(&motors[0], 0) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /* 第四步：配置0x201~0x208过滤器，启动CAN接收中断。 */
+  /* 第三步：配置0x201~0x208过滤器，启动CAN接收中断。 */
   if (M3508_Manager_Start(&m3508_manager) != HAL_OK)
   {
     Error_Handler();
@@ -235,183 +144,15 @@ int main(void)
   {
     const uint32_t now_tick = HAL_GetTick();
 
-    /*
-     * 每1ms执行一次速度环，位置环每5ms执行一次。
-     * 两个PID都只使用最新反馈，CAN控制帧仍保持1ms周期发送。
-     */
-    if ((now_tick - last_speed_control_tick) >=
-        M3508_SPEED_CONTROL_PERIOD_MS)
+    if ((now_tick - last_axis_control_tick) >= AXIS_CONTROL_PERIOD_MS)
     {
-      uint8_t motor1_feedback_updated = 0U;
+      last_axis_control_tick = now_tick;
 
-      last_speed_control_tick = now_tick;
-
-      /* 读取各电机最新反馈，并更新在线状态。 */
       for (uint8_t index = 0U; index < M3508_MOTOR_COUNT; ++index)
       {
-        const uint8_t feedback_updated =
-            M3508_Motor_GetFeedback(&motors[index],
-                                    &motor_feedback_snapshot[index]);
-
-        if (index == 0U)
-        {
-          motor1_feedback_updated = feedback_updated;
-        }
-
-        motor_online[index] = M3508_Motor_IsOnline(
-            &motors[index], now_tick, M3508_OFFLINE_TIMEOUT_MS);
+        Axis_Update(&axes[index], now_tick);
       }
 
-      if (motor_online[0] == 0U)
-      {
-        /*
-         * 失联时立即清零电流和两个PID，但保留上电时建立的位置零点。
-         * 否则短暂掉线会把当前位置误当成新零点，造成无法完全回正。
-         */
-        PID_Reset(&ID_1_M3508);
-        PID_Reset(&position_PID_1_M3508);
-        motor1_pid_output = 0.0f;
-        motor1_current_command = 0;
-        motor1_target_speed_rpm = 0.0f;
-        motor1_previous_position_error = 0.0f;
-        motor1_return_motion_detected = 0U;
-        (void)M3508_Motor_SetCurrent(&motors[0], 0);
-      }
-      else if (motor1_feedback_updated != 0U)
-      {
-        /* 首次在线时把当前位置记作0度，避免上电后主动寻找绝对零点。 */
-        if (motor1_position_reference_ready == 0U)
-        {
-          motor1_position_zero_encoder =
-              motor_feedback_snapshot[0].total_encoder;
-          motor1_position_degree = 0.0f;
-          motor1_position_error = 0.0f;
-          motor1_previous_position_error = 0.0f;
-          motor1_target_speed_rpm = 0.0f;
-          motor1_position_reference_ready = 1U;
-          last_position_control_tick = now_tick;
-          PID_Reset(&position_PID_1_M3508);
-          PID_Reset(&ID_1_M3508);
-          PID_SetTarget(&ID_1_M3508, 0.0f);
-        }
-
-        /* 外层位置PID：输出轴角度误差转换为电机转子侧目标转速。 */
-        if ((now_tick - last_position_control_tick) >=
-            M3508_POSITION_CONTROL_PERIOD_MS)
-        {
-          motor1_position_degree = M3508_EncoderToOutputDegree(
-              motor_feedback_snapshot[0].total_encoder -
-              motor1_position_zero_encoder);
-          motor1_position_error = position_PID_1_M3508.target -
-                                  motor1_position_degree;
-
-          /* 越过目标位置时清除旧方向的速度积分，避免积分继续推过头。 */
-          if (((motor1_position_error > 0.0f) &&
-               (motor1_previous_position_error < 0.0f)) ||
-              ((motor1_position_error < 0.0f) &&
-               (motor1_previous_position_error > 0.0f)))
-          {
-            ID_1_M3508.integral = 0.0f;
-          }
-          motor1_previous_position_error = motor1_position_error;
-
-          /* 进入目标附近后停止位置修正，由速度环负责把转速刹到0。 */
-          if ((motor1_position_error <= M3508_POSITION_DEADBAND_DEG) &&
-              (motor1_position_error >= -M3508_POSITION_DEADBAND_DEG))
-          {
-            motor1_target_speed_rpm = 0.0f;
-            motor1_return_motion_detected = 0U;
-            PID_Reset(&position_PID_1_M3508);
-            ID_1_M3508.integral = 0.0f;
-          }
-          else
-          {
-            motor1_target_speed_rpm = PID_Calculate(
-                &position_PID_1_M3508,
-                motor1_position_degree);
-          }
-          PID_SetTarget(&ID_1_M3508, motor1_target_speed_rpm);
-          last_position_control_tick = now_tick;
-        }
-
-        /* 内层速度PID：目标转速误差转换为C620电流指令。 */
-        motor1_pid_output = PID_Calculate(
-            &ID_1_M3508,
-            (float)motor_feedback_snapshot[0].speed_rpm);
-        motor1_current_command = (int16_t)motor1_pid_output;
-
-        /*
-         * 低速回位时补偿减速箱静摩擦。
-         * 仅当PID输出与目标速度同向时加入，若速度环正在反向刹车则不补偿。
-         */
-        if ((motor_feedback_snapshot[0].speed_rpm <=
-             M3508_FRICTION_FF_MAX_SPEED_RPM) &&
-            (motor_feedback_snapshot[0].speed_rpm >=
-             -M3508_FRICTION_FF_MAX_SPEED_RPM))
-        {
-          if ((motor1_target_speed_rpm > 0.0f) &&
-              (motor1_current_command > 0))
-          {
-            motor1_current_command += M3508_FRICTION_FF_CURRENT;
-          }
-          else if ((motor1_target_speed_rpm < 0.0f) &&
-                   (motor1_current_command < 0))
-          {
-            motor1_current_command -= M3508_FRICTION_FF_CURRENT;
-          }
-        }
-
-        /* 前馈加入后再次限幅，确保不超过C620调试电流限制。 */
-        if (motor1_current_command > (int16_t)M3508_PID_CURRENT_LIMIT)
-        {
-          motor1_current_command = (int16_t)M3508_PID_CURRENT_LIMIT;
-        }
-        else if (motor1_current_command <
-                 (int16_t)(-M3508_PID_CURRENT_LIMIT))
-        {
-          motor1_current_command = (int16_t)(-M3508_PID_CURRENT_LIMIT);
-        }
-        motor1_pid_output = (float)motor1_current_command;
-
-        /* 只识别朝零点方向的回位运动，避免把手动移开时的停顿误认为卡顿。 */
-        if (((motor1_target_speed_rpm > 0.0f) &&
-             (motor_feedback_snapshot[0].speed_rpm >=
-              M3508_STALL_MOVING_SPEED_RPM)) ||
-            ((motor1_target_speed_rpm < 0.0f) &&
-             (motor_feedback_snapshot[0].speed_rpm <=
-              -M3508_STALL_MOVING_SPEED_RPM)))
-        {
-          motor1_return_motion_detected = 1U;
-        }
-
-        /* 回位已经运动过，但在死区外再次接近静止时，锁存第一现场。 */
-        if ((motor1_stall_snapshot.valid == 0U) &&
-            (motor1_return_motion_detected != 0U) &&
-            (motor_feedback_snapshot[0].speed_rpm <=
-             M3508_STALL_STOP_SPEED_RPM) &&
-            (motor_feedback_snapshot[0].speed_rpm >=
-             -M3508_STALL_STOP_SPEED_RPM) &&
-            ((motor1_position_error > M3508_POSITION_DEADBAND_DEG) ||
-             (motor1_position_error < -M3508_POSITION_DEADBAND_DEG)))
-        {
-          motor1_stall_snapshot.tick = now_tick;
-          motor1_stall_snapshot.position_degree = motor1_position_degree;
-          motor1_stall_snapshot.position_error = motor1_position_error;
-          motor1_stall_snapshot.target_speed_rpm = motor1_target_speed_rpm;
-          motor1_stall_snapshot.actual_speed_rpm =
-              motor_feedback_snapshot[0].speed_rpm;
-          motor1_stall_snapshot.current_command = motor1_current_command;
-          motor1_stall_snapshot.feedback_current =
-              motor_feedback_snapshot[0].current;
-          motor1_stall_snapshot.speed_integral = ID_1_M3508.integral;
-          motor1_stall_snapshot.valid = 1U;
-        }
-
-        (void)M3508_Motor_SetCurrent(&motors[0],
-                                     motor1_current_command);
-      }
-
-      /* 即使本周期没有新反馈，也继续发送上一次电流指令。 */
       motor_tx_status = M3508_Manager_SendCurrents(&m3508_manager);
     }
     /* USER CODE END WHILE */
