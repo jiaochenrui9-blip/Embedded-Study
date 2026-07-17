@@ -5,8 +5,10 @@
 #ifndef RS05_RS05_APP_H
 #define RS05_RS05_APP_H
 
-#include "can_bus.h"
-
+#include "CAN_bus.h"
+#include "RS05_parameter.h"
+#define RS05_MASTER_ID       0xFDU
+#define RS05_MOTOR_ID       0x01U
 #define RS05_MOTOR_MAX_COUNT 10U
 
 typedef struct
@@ -24,9 +26,7 @@ typedef struct
      uint32_t last_feedback_tick;
 
     /* Type 17 参数读取响应，协议中的浮点值采用小端字节序。 */
-     uint16_t last_parameter_index;
-     float last_parameter_value;
-     uint8_t parameter_reply_valid;
+    RS05_ParameterCache parameter;
 
 } RS05_MotorTypedef;
 
@@ -61,6 +61,25 @@ HAL_StatusTypeDef RS05_Stop(CAN_HandleTypeDef *hcan,
 HAL_StatusTypeDef RS05_SetMotionMode(CAN_HandleTypeDef *hcan,
                                      uint8_t master_id,
                                      uint8_t motor_id);
+HAL_StatusTypeDef RS05_Command_ParaRead(RS05_ManagerTypedef *manager,
+                                        uint8_t motor_id,
+                                        uint16_t index);
+HAL_StatusTypeDef RS05_WriteParameterU8(RS05_ManagerTypedef *manager,
+                                        uint8_t motor_id,
+                                        uint16_t index,
+                                        uint8_t value);
+HAL_StatusTypeDef RS05_WriteParameterU16(RS05_ManagerTypedef *manager,
+                                         uint8_t motor_id,
+                                         uint16_t index,
+                                         uint16_t value);
+HAL_StatusTypeDef RS05_WriteParameterU32(RS05_ManagerTypedef *manager,
+                                         uint8_t motor_id,
+                                         uint16_t index,
+                                         uint32_t value);
+HAL_StatusTypeDef RS05_WriteParameterFloat(RS05_ManagerTypedef *manager,
+                                           uint8_t motor_id,
+                                           uint16_t index,
+                                           float value);
 
 void RS05_Manager_Init(RS05_ManagerTypedef *manager, CAN_HandleTypeDef *hcan);
 HAL_StatusTypeDef RS05_Manager_RegisterMotor(RS05_ManagerTypedef *manager,

@@ -21,7 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "app_RS05.h"
+#include "RS05_app.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -31,13 +31,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define RS05_RUN_MOTOR_TEST       1U
-#define RS05_MASTER_ID      0xFDU
-#define RS05_MOTOR_ID       0x01U
-#define RS05_TEST_SPEED_RAD_S     1.0f
-#define RS05_TEST_KD              0.5f
-#define RS05_CONTROL_PERIOD_MS    10U
-#define RS05_POWER_ON_DELAY_MS    1000U
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -55,6 +49,7 @@ static RS05_MotorTypedef RS05_Motor1 = {
   .motor_id = RS05_MOTOR_ID,
 };
 static RS05_ManagerTypedef RS05_Manager;
+static volatile HAL_StatusTypeDef RS05_LastStatus = HAL_OK;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -103,37 +98,45 @@ int main(void)
   MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
   RS05_Manager_Init(&RS05_Manager, &hcan1);
-  (void)RS05_Manager_RegisterMotor(&RS05_Manager, &RS05_Motor1);
-  (void)CAN_Init(&hcan1);
+  RS05_LastStatus = RS05_Manager_RegisterMotor(&RS05_Manager, &RS05_Motor1);
+  if (RS05_LastStatus != HAL_OK)
+  {
+    Error_Handler();
+  }
 
-#if RS05_RUN_MOTOR_TEST
-  HAL_Delay(RS05_POWER_ON_DELAY_MS);
+  RS05_LastStatus = CAN_Init(&hcan1);
+  if (RS05_LastStatus != HAL_OK)
+  {
+    Error_Handler();
+  }
 
-  (void)RS05_SetMotionMode(&hcan1, RS05_MASTER_ID, RS05_MOTOR_ID);
+
+  HAL_Delay(1000U);
+
+  RS05_LastStatus = RS05_Enable(&hcan1, RS05_MASTER_ID, RS05_MOTOR_ID);
+  if (RS05_LastStatus != HAL_OK)
+  {
+    Error_Handler();
+  }
   HAL_Delay(20U);
-  (void)RS05_Enable(&hcan1, RS05_MASTER_ID, RS05_MOTOR_ID);
-  HAL_Delay(20U);
-#endif
+
 /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    RS05_LastStatus = RS05_MotionControl(&hcan1,
+                                         RS05_MOTOR_ID,
+                                         0.0f,
+                                         1.0f,
+                                         0.0f,
+                                         1.0f,
+                                         0.0f);
+
+    HAL_Delay(10);
     /* USER CODE END WHILE */
-
     /* USER CODE BEGIN 3 */
-#if RS05_RUN_MOTOR_TEST
-    (void)RS05_MotionControl(&hcan1,
-                             RS05_MOTOR_ID,
-                             0.0f,
-                             RS05_TEST_SPEED_RAD_S,
-                             0.0f,
-                             RS05_TEST_KD,
-                             0.0f);
-
-    HAL_Delay(RS05_CONTROL_PERIOD_MS);
-#endif
   }
   /* USER CODE END 3 */
 }
@@ -202,8 +205,8 @@ static void MX_CAN1_Init(void)
   hcan1.Init.Prescaler = 3;
   hcan1.Init.Mode = CAN_MODE_NORMAL;
   hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
-  hcan1.Init.TimeSeg1 = CAN_BS1_7TQ;
-  hcan1.Init.TimeSeg2 = CAN_BS2_6TQ;
+  hcan1.Init.TimeSeg1 = CAN_BS1_9TQ;
+  hcan1.Init.TimeSeg2 = CAN_BS2_4TQ;
   hcan1.Init.TimeTriggeredMode = DISABLE;
   hcan1.Init.AutoBusOff = ENABLE;
   hcan1.Init.AutoWakeUp = DISABLE;

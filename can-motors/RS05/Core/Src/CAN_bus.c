@@ -3,7 +3,7 @@
 //
 
 
-#include "can_bus.h"
+#include "CAN_bus.h"
 
 HAL_StatusTypeDef CAN_Filter_Start(CAN_HandleTypeDef *hcan)
 {
@@ -39,7 +39,6 @@ HAL_StatusTypeDef CAN_Filter_Start(CAN_HandleTypeDef *hcan)
 
 HAL_StatusTypeDef CAN_Init (CAN_HandleTypeDef *hcan)
 {
-    const uint32_t notifications = CAN_IT_RX_FIFO0_MSG_PENDING;
 
     if (hcan == NULL)
     {
@@ -54,7 +53,7 @@ HAL_StatusTypeDef CAN_Init (CAN_HandleTypeDef *hcan)
     {
         return HAL_ERROR;
     }
-    if (HAL_CAN_ActivateNotification(hcan, notifications) != HAL_OK)
+    if (HAL_CAN_ActivateNotification(hcan, CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK)
     {
         return HAL_ERROR;
     }
@@ -74,7 +73,10 @@ HAL_StatusTypeDef CAN_SendExtFrame(CAN_HandleTypeDef *hcan,
     {
         return HAL_ERROR;
     }
-
+    if (HAL_CAN_GetTxMailboxesFreeLevel(hcan) == 0)
+    {
+        return HAL_ERROR;
+    }
     txHeader.IDE = CAN_ID_EXT;
     txHeader.ExtId = ext_id;
     txHeader.RTR = CAN_RTR_DATA;

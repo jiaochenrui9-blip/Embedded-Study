@@ -33,10 +33,16 @@ enable_language(C ASM)
 
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME}
-    Core/Src/can_bus.c
-    Core/Inc/can_bus.h
-    Core/Src/app_RS05.c
-    Core/Inc/app_RS05.h)
+    Core/Src/CAN_bus.c
+    Core/Inc/CAN_bus.h
+    Core/Src/RS05_app.c
+    Core/Inc/RS05_app.h
+    Core/Src/RS05_codec.c
+    Core/Inc/RS05_codec.h
+    Core/Src/RS05_receive.c
+    Core/Inc/RS05_receive.h
+    Core/Src/RS05_parameter.c
+    Core/Inc/RS05_parameter.h)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)

@@ -1,7 +1,9 @@
 //
 // Created by game on 2026/7/16.
 //
-#include "app_RS05.h"
+#include "RS05_app.h"
+#include "RS05_codec.h"
+#include "RS05_receive.h"
 #include <string.h>
 
 #define RS05_POSITION_MIN_RAD       (-12.57f)
@@ -15,18 +17,19 @@
 #define RS05_TORQUE_MIN_NM          (-5.5f)
 #define RS05_TORQUE_MAX_NM          (5.5f)
 
+
 #define RS05_COMM_TYPE_MOTION_CONTROL      0x01U
-#define RS05_COMM_TYPE_FEEDBACK            0x02U
 #define RS05_COMM_TYPE_ENABLE              0x03U
 #define RS05_COMM_TYPE_STOP                0x04U
 #define RS05_COMM_TYPE_READ_PARAMETER      0x11U
 #define RS05_COMM_TYPE_WRITE_PARAMETER     0x12U
 
 #define RS05_PARAMETER_RUN_MODE            0x7005U
-#define RS05_RUN_MODE_MOTION                0.0f
+#define RS05_RUN_MODE_MOTION                0U
+
 
 static RS05_MotorTypedef *RS05_Manager_FindMotor(const RS05_ManagerTypedef *manager,
-                                                  uint8_t motor_id)
+uint8_t motor_id)
 {
     uint8_t i;
 
@@ -45,97 +48,6 @@ static RS05_MotorTypedef *RS05_Manager_FindMotor(const RS05_ManagerTypedef *mana
     }
 
     return NULL;
-}
-
-static void RS05_WriteUint16BE(uint8_t *data, uint16_t value)
-{
-    data[0] = (uint8_t)(value >> 8);
-    data[1] = (uint8_t)value;
-}
-
-static void RS05_WriteUint16LE(uint8_t *data, uint16_t value)
-{
-    data[0] = (uint8_t)value;
-    data[1] = (uint8_t)(value >> 8);
-}
-
-static void RS05_WriteFloatLE(uint8_t *data, float value)
-{
-    uint32_t raw;
-
-    memcpy(&raw, &value, sizeof(raw));
-    data[0] = (uint8_t)raw;
-    data[1] = (uint8_t)(raw >> 8);
-    data[2] = (uint8_t)(raw >> 16);
-    data[3] = (uint8_t)(raw >> 24);
-}
-
-static uint16_t RS05_ReadUint16BE(const uint8_t *data)
-{
-    return ((uint16_t)data[0] << 8) | data[1];
-}
-
-static uint16_t RS05_ReadUint16LE(const uint8_t *data)
-{
-    return ((uint16_t)data[1] << 8) | data[0];
-}
-
-static uint16_t RS05_FloatToUint16(float value, float minimum, float maximum)
-{
-    if (value < minimum)
-    {
-        value = minimum;
-    }
-    else if (value > maximum)
-    {
-        value = maximum;
-    }
-
-    return (uint16_t)((value - minimum) * 65535.0f / (maximum - minimum));
-}
-
-static float RS05_Uint16ToFloat(uint16_t value, float minimum, float maximum)
-{
-    return ((float)value * (maximum - minimum) / 65535.0f) + minimum;
-}
-
-static float RS05_ReadFloatLE(const uint8_t *data)
-{
-    uint32_t raw = ((uint32_t)data[0]) |
-                   ((uint32_t)data[1] << 8) |
-                   ((uint32_t)data[2] << 16) |
-                   ((uint32_t)data[3] << 24);
-    float value;
-
-    memcpy(&value, &raw, sizeof(value));
-    return value;
-}
-
-static void RS05_ParseType2Feedback(RS05_MotorTypedef *motor,
-                                    uint32_t ext_id,
-                                    const uint8_t *data)
-{
-    motor->position_rad = RS05_Uint16ToFloat(RS05_ReadUint16BE(&data[0]),
-                                              RS05_POSITION_MIN_RAD,
-                                              RS05_POSITION_MAX_RAD);
-    motor->velocity_rad_s = RS05_Uint16ToFloat(RS05_ReadUint16BE(&data[2]),
-                                                RS05_VELOCITY_MIN_RAD_S,
-                                                RS05_VELOCITY_MAX_RAD_S);
-    motor->torque_nm = RS05_Uint16ToFloat(RS05_ReadUint16BE(&data[4]),
-                                           RS05_TORQUE_MIN_NM,
-                                           RS05_TORQUE_MAX_NM);
-    motor->temperature_c = (float)RS05_ReadUint16BE(&data[6]) * 0.1f;
-    motor->state = (uint8_t)((ext_id >> 22) & 0x03U);
-    motor->fault = (uint8_t)((ext_id >> 16) & 0x3FU);
-    motor->last_feedback_tick = HAL_GetTick();
-}
-
-static void RS05_ParseType17ParameterReply(RS05_MotorTypedef *motor,
-                                            const uint8_t *data)
-{
-    motor->last_parameter_index = RS05_ReadUint16LE(&data[0]);
-    motor->last_parameter_value = RS05_ReadFloatLE(&data[4]);
-    motor->parameter_reply_valid = 1U;
 }
 
 uint32_t RS05_BuildExtId(uint8_t comm_type,
@@ -189,15 +101,15 @@ HAL_StatusTypeDef RS05_MotionControl(CAN_HandleTypeDef *hcan,
         return HAL_ERROR;
     }
 
-    RS05_WriteUint16BE(&data[0], RS05_FloatToUint16(position_rad,
+    RS05_Codec_WriteU16BE(&data[0], RS05_Codec_FloatToU16(position_rad,
                                                      RS05_POSITION_MIN_RAD,
                                                      RS05_POSITION_MAX_RAD));
-    RS05_WriteUint16BE(&data[2], RS05_FloatToUint16(velocity_rad_s,
+    RS05_Codec_WriteU16BE(&data[2], RS05_Codec_FloatToU16(velocity_rad_s,
                                                      RS05_VELOCITY_MIN_RAD_S,
                                                      RS05_VELOCITY_MAX_RAD_S));
-    RS05_WriteUint16BE(&data[4], RS05_FloatToUint16(kp, RS05_KP_MIN, RS05_KP_MAX));
-    RS05_WriteUint16BE(&data[6], RS05_FloatToUint16(kd, RS05_KD_MIN, RS05_KD_MAX));
-    torque_raw = RS05_FloatToUint16(torque_nm, RS05_TORQUE_MIN_NM,
+    RS05_Codec_WriteU16BE(&data[4], RS05_Codec_FloatToU16(kp, RS05_KP_MIN, RS05_KP_MAX));
+    RS05_Codec_WriteU16BE(&data[6], RS05_Codec_FloatToU16(kd, RS05_KD_MIN, RS05_KD_MAX));
+    torque_raw = RS05_Codec_FloatToU16(torque_nm, RS05_TORQUE_MIN_NM,
                                     RS05_TORQUE_MAX_NM);
 
     return RS05_SendData(hcan, RS05_COMM_TYPE_MOTION_CONTROL,
@@ -229,8 +141,8 @@ HAL_StatusTypeDef RS05_SetMotionMode(CAN_HandleTypeDef *hcan,
         return HAL_ERROR;
     }
 
-    RS05_WriteUint16LE(&data[0], RS05_PARAMETER_RUN_MODE);
-    RS05_WriteFloatLE(&data[4], RS05_RUN_MODE_MOTION);
+    RS05_Codec_WriteU16LE(&data[0], RS05_PARAMETER_RUN_MODE);
+    data[4] = RS05_RUN_MODE_MOTION;
 
     return RS05_SendData(hcan, RS05_COMM_TYPE_WRITE_PARAMETER,
                          data, master_id, motor_id);
@@ -266,6 +178,92 @@ HAL_StatusTypeDef RS05_Manager_RegisterMotor(RS05_ManagerTypedef *manager,
     return HAL_OK;
 }
 
+static HAL_StatusTypeDef RS05_WriteParameterRaw(RS05_ManagerTypedef *manager,
+                                                 uint8_t motor_id,
+                                                 uint16_t index,
+                                                 const uint8_t value[4])
+{
+    uint8_t data[8] = {0};
+
+    if ((manager == NULL) || (manager->hcan == NULL) || (value == NULL))
+    {
+        return HAL_ERROR;
+    }
+
+    RS05_Codec_WriteU16LE(&data[0], index);
+    memcpy(&data[4], value, 4U);
+
+    return RS05_SendData(manager->hcan,
+                         RS05_COMM_TYPE_WRITE_PARAMETER,
+                         data,
+                         RS05_MASTER_ID,
+                         motor_id);
+}
+
+HAL_StatusTypeDef RS05_Command_ParaRead(RS05_ManagerTypedef *manager,
+                                        uint8_t motor_id,
+                                        uint16_t index)
+{
+
+    uint8_t data[8] = {0};
+
+    if ((manager == NULL) || (manager->hcan == NULL))
+    {
+        return HAL_ERROR;
+    }
+
+    RS05_Codec_WriteU16LE(&data[0], index);
+    return RS05_SendData(manager->hcan,
+                         RS05_COMM_TYPE_READ_PARAMETER,
+                         data,
+                         RS05_MASTER_ID,
+                         motor_id);
+
+}
+
+HAL_StatusTypeDef RS05_WriteParameterU8(RS05_ManagerTypedef *manager,
+                                        uint8_t motor_id,
+                                        uint16_t index,
+                                        uint8_t value)
+{
+    uint8_t raw[4] = {value, 0U, 0U, 0U};
+
+    return RS05_WriteParameterRaw(manager, motor_id, index, raw);
+}
+
+HAL_StatusTypeDef RS05_WriteParameterU16(RS05_ManagerTypedef *manager,
+                                         uint8_t motor_id,
+                                         uint16_t index,
+                                         uint16_t value)
+{
+    uint8_t raw[4] = {0};
+
+    RS05_Codec_WriteU16LE(raw, value);
+    return RS05_WriteParameterRaw(manager, motor_id, index, raw);
+}
+
+HAL_StatusTypeDef RS05_WriteParameterU32(RS05_ManagerTypedef *manager,
+                                         uint8_t motor_id,
+                                         uint16_t index,
+                                         uint32_t value)
+{
+    uint8_t raw[4] = {0};
+
+    RS05_Codec_WriteU32LE(raw, value);
+    return RS05_WriteParameterRaw(manager, motor_id, index, raw);
+}
+
+HAL_StatusTypeDef RS05_WriteParameterFloat(RS05_ManagerTypedef *manager,
+                                           uint8_t motor_id,
+                                           uint16_t index,
+                                           float value)
+{
+    uint8_t raw[4] = {0};
+
+    RS05_Codec_WriteFloatLE(raw, value);
+    return RS05_WriteParameterRaw(manager, motor_id, index, raw);
+}
+
 void RS05_Manager_ProcessRxFifo0(RS05_ManagerTypedef *manager)
 {
     CAN_RxHeaderTypeDef rx_header;
@@ -279,10 +277,6 @@ void RS05_Manager_ProcessRxFifo0(RS05_ManagerTypedef *manager)
 
     while (HAL_CAN_GetRxFifoFillLevel(manager->hcan, CAN_RX_FIFO0) > 0U)
     {
-        uint8_t comm_type;
-        uint8_t motor_id;
-        RS05_MotorTypedef *motor;
-
         status = HAL_CAN_GetRxMessage(manager->hcan, CAN_RX_FIFO0,
                                        &rx_header, rx_data);
         if (status != HAL_OK)
@@ -297,30 +291,6 @@ void RS05_Manager_ProcessRxFifo0(RS05_ManagerTypedef *manager)
             continue;
         }
 
-        comm_type = (uint8_t)((rx_header.ExtId >> 24) & 0x1FU);
-        /* RS05 反馈帧的 Data Area 2 低字节是发出反馈的电机 ID。 */
-        motor_id = (uint8_t)((rx_header.ExtId >> 8) & 0xFFU);
-        motor = RS05_Manager_FindMotor(manager, motor_id);
-        if (motor == NULL)
-        {
-            continue;
-        }
-
-
-
-        switch (comm_type)
-        {
-            case RS05_COMM_TYPE_FEEDBACK:
-                RS05_ParseType2Feedback(motor, rx_header.ExtId, rx_data);
-                break;
-
-            case RS05_COMM_TYPE_READ_PARAMETER:
-                RS05_ParseType17ParameterReply(motor, rx_data);
-                break;
-
-            default:
-                /* 其他通信类型保留原始帧，后续按手册添加专用解析器。 */
-                break;
-        }
+        RS05_ProcessFrame(manager, rx_header.ExtId, rx_data);
     }
 }
