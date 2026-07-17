@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "RS05_app.h"
+#include "RS05_Command.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -31,7 +32,10 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define RS05_TEST_POSITION_STEP_RAD  0.5f
+#define RS05_TEST_PP_SPEED_RAD_S     2.0f
+#define RS05_TEST_PP_ACCEL_RAD_S2    5.0f
+#define RS05_TEST_CURRENT_A          2.0f
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -50,6 +54,7 @@ static RS05_MotorTypedef RS05_Motor1 = {
 };
 static RS05_ManagerTypedef RS05_Manager;
 static volatile HAL_StatusTypeDef RS05_LastStatus = HAL_OK;
+static volatile float RS05_TargetPositionRad = 3.0f;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -113,6 +118,29 @@ int main(void)
 
   HAL_Delay(1000U);
 
+  RS05_LastStatus = RS05_Stop(&hcan1, RS05_MASTER_ID, RS05_MOTOR_ID);
+  if (RS05_LastStatus != HAL_OK)
+  {
+    Error_Handler();
+  }
+  HAL_Delay(20U);
+
+  if (RS05_Motor1.last_feedback_tick == 0U)
+  {
+    Error_Handler();
+  }
+  RS05_TargetPositionRad = RS05_Motor1.position_rad +
+                           RS05_TEST_POSITION_STEP_RAD;
+
+  RS05_LastStatus = RS05_SetMode(&RS05_Manager,
+                                 &RS05_Motor1,
+                                 RS05_MODE_SPEED);
+  if (RS05_LastStatus != HAL_OK)
+  {
+    Error_Handler();
+  }
+  HAL_Delay(20U);
+
   RS05_LastStatus = RS05_Enable(&hcan1, RS05_MASTER_ID, RS05_MOTOR_ID);
   if (RS05_LastStatus != HAL_OK)
   {
@@ -120,21 +148,25 @@ int main(void)
   }
   HAL_Delay(20U);
 
+
+  if (RS05_LastStatus != HAL_OK)
+  {
+    Error_Handler();
+  }
+
 /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    RS05_LastStatus = RS05_MotionControl(&hcan1,
-                                         RS05_MOTOR_ID,
-                                         0.0f,
-                                         1.0f,
-                                         0.0f,
-                                         1.0f,
-                                         0.0f);
+    RS05_LastStatus = RS05_SetSpeedMode(&RS05_Manager,&RS05_Motor1,5.0f,2.0f,2.0f);
 
-    HAL_Delay(10);
+
+
+
+
+    HAL_Delay(100);
     /* USER CODE END WHILE */
     /* USER CODE BEGIN 3 */
   }

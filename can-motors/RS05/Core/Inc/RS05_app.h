@@ -7,9 +7,7 @@
 
 #include "CAN_bus.h"
 #include "RS05_parameter.h"
-#define RS05_MASTER_ID       0xFDU
-#define RS05_MOTOR_ID       0x01U
-#define RS05_MOTOR_MAX_COUNT 10U
+#include "RS05_Command.h"
 
 typedef struct
 {
@@ -80,10 +78,41 @@ HAL_StatusTypeDef RS05_WriteParameterFloat(RS05_ManagerTypedef *manager,
                                            uint8_t motor_id,
                                            uint16_t index,
                                            float value);
+HAL_StatusTypeDef RS05_SetMode(RS05_ManagerTypedef *manager,
+                               RS05_MotorTypedef *motor,
+                               uint8_t mode);
+HAL_StatusTypeDef RS05_SetSpeedMode(RS05_ManagerTypedef *manager,
+                                    RS05_MotorTypedef *motor,
+                                    float target_speed_rad_s,
+                                    float acceleration_rad_s2,
+                                    float current_limit_a);
+HAL_StatusTypeDef RS05_SetCurrentMode(RS05_ManagerTypedef *manager,
+                                      RS05_MotorTypedef *motor,
+                                      float target_current_a);
+HAL_StatusTypeDef RS05_SetPPMode(RS05_ManagerTypedef *manager,
+                                 RS05_MotorTypedef *motor,
+                                 float target_position_rad,
+                                 float max_velocity_rad_s,
+                                 float acceleration_rad_s2,
+                                 float current_limit_a);
+HAL_StatusTypeDef RS05_SetCSPMode(RS05_ManagerTypedef *manager,
+                                  RS05_MotorTypedef *motor,
+                                  float target_position_rad,
+                                  float speed_limit_rad_s,
+                                  float current_limit_a);
+HAL_StatusTypeDef RS05_SetMotionControl(RS05_ManagerTypedef *manager,
+                                        RS05_MotorTypedef *motor,
+                                        float position_rad,
+                                        float velocity_rad_s,
+                                        float kp,
+                                        float kd,
+                                        float torque_ff_nm);
 
 void RS05_Manager_Init(RS05_ManagerTypedef *manager, CAN_HandleTypeDef *hcan);
 HAL_StatusTypeDef RS05_Manager_RegisterMotor(RS05_ManagerTypedef *manager,
                                               RS05_MotorTypedef *motor);
 void RS05_Manager_ProcessRxFifo0(RS05_ManagerTypedef *manager);
+
+uint8_t RS05_IsOnline(RS05_MotorTypedef *motor);
 
 #endif // RS05_RS05_APP_H

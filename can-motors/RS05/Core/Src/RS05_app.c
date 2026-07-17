@@ -6,28 +6,12 @@
 #include "RS05_receive.h"
 #include <string.h>
 
-#define RS05_POSITION_MIN_RAD       (-12.57f)
-#define RS05_POSITION_MAX_RAD       (12.57f)
-#define RS05_VELOCITY_MIN_RAD_S     (-50.0f)
-#define RS05_VELOCITY_MAX_RAD_S     (50.0f)
-#define RS05_KP_MIN                 (0.0f)
-#define RS05_KP_MAX                 (500.0f)
-#define RS05_KD_MIN                 (0.0f)
-#define RS05_KD_MAX                 (5.0f)
-#define RS05_TORQUE_MIN_NM          (-5.5f)
-#define RS05_TORQUE_MAX_NM          (5.5f)
+#include "RS05_Command.h"
 
-
-#define RS05_COMM_TYPE_MOTION_CONTROL      0x01U
-#define RS05_COMM_TYPE_ENABLE              0x03U
-#define RS05_COMM_TYPE_STOP                0x04U
-#define RS05_COMM_TYPE_READ_PARAMETER      0x11U
-#define RS05_COMM_TYPE_WRITE_PARAMETER     0x12U
-
-#define RS05_PARAMETER_RUN_MODE            0x7005U
-#define RS05_RUN_MODE_MOTION                0U
-
-
+static uint8_t RS05_ValueInRange(float value, float minimum, float maximum)
+{
+    return (uint8_t)((value >= minimum) && (value <= maximum));
+}
 static RS05_MotorTypedef *RS05_Manager_FindMotor(const RS05_ManagerTypedef *manager,
 uint8_t motor_id)
 {
@@ -130,23 +114,6 @@ HAL_StatusTypeDef RS05_Stop(CAN_HandleTypeDef *hcan,
     return RS05_SendData(hcan, RS05_COMM_TYPE_STOP, data, master_id, motor_id);
 }
 
-HAL_StatusTypeDef RS05_SetMotionMode(CAN_HandleTypeDef *hcan,
-                                     uint8_t master_id,
-                                     uint8_t motor_id)
-{
-    uint8_t data[8] = {0};
-
-    if (hcan == NULL)
-    {
-        return HAL_ERROR;
-    }
-
-    RS05_Codec_WriteU16LE(&data[0], RS05_PARAMETER_RUN_MODE);
-    data[4] = RS05_RUN_MODE_MOTION;
-
-    return RS05_SendData(hcan, RS05_COMM_TYPE_WRITE_PARAMETER,
-                         data, master_id, motor_id);
-}
 
 void RS05_Manager_Init(RS05_ManagerTypedef *manager, CAN_HandleTypeDef *hcan)
 {
@@ -264,6 +231,273 @@ HAL_StatusTypeDef RS05_WriteParameterFloat(RS05_ManagerTypedef *manager,
     return RS05_WriteParameterRaw(manager, motor_id, index, raw);
 }
 
+static uint8_t RS05_MotorIsReady(const RS05_ManagerTypedef *manager,
+                                 const RS05_MotorTypedef *motor)
+{
+    return (uint8_t)((manager != NULL) &&
+                     (manager->hcan != NULL) &&
+                     (motor != NULL) &&
+                     (RS05_Manager_FindMotor(manager, motor->motor_id) == motor));
+}
+
+static HAL_StatusTypeDef RS05_WriteMotorFloat(RS05_ManagerTypedef *manager,
+                                               RS05_MotorTypedef *motor,
+                                               uint16_t index,
+                                               float value)
+{
+    if (RS05_MotorIsReady(manager, motor) == 0U)
+    {
+        return HAL_ERROR;
+    }
+
+    return RS05_WriteParameterFloat(manager,
+                                    motor->motor_id,
+                                    index,
+                                    value);
+}
+
+static HAL_StatusTypeDef RS05_WriteMotorFloatAndWait(RS05_ManagerTypedef *manager,
+                                                      RS05_MotorTypedef *motor,
+                                                      uint16_t index,
+                                                      float value)
+{
+    HAL_StatusTypeDef status = RS05_WriteMotorFloat(manager, motor, index, value);
+
+    if (status == HAL_OK)
+    {
+        HAL_Delay(RS05_COMMAND_INTERVAL_MS);
+    }
+
+    return status;
+}
+
+HAL_StatusTypeDef RS05_SetMode(RS05_ManagerTypedef *manager,
+                               RS05_MotorTypedef *motor,
+                               uint8_t mode)
+{
+    if ((RS05_MotorIsReady(manager, motor) == 0U) ||
+        ((mode != RS05_MODE_MOTION) &&
+         (mode != RS05_MODE_POSITION_PP) &&
+         (mode != RS05_MODE_SPEED) &&
+         (mode != RS05_MODE_CURRENT) &&
+         (mode != RS05_MODE_POSITION_CSP)))
+    {
+        return HAL_ERROR;
+    }
+
+    return RS05_WriteParameterU8(manager,
+                                 motor->motor_id,
+                                 RS05_PARAMETER_RUN_MODE,
+                                 mode);
+}
+
+HAL_StatusTypeDef RS05_SetSpeedMode(RS05_ManagerTypedef *manager,
+                                    RS05_MotorTypedef *motor,
+                                    float target_speed_rad_s,
+                                    float acceleration_rad_s2,
+                                    float current_limit_a)
+{
+    HAL_StatusTypeDef status;
+
+    if ((RS05_MotorIsReady(manager, motor) == 0U) ||
+        (RS05_ValueInRange(target_speed_rad_s,
+                           RS05_SPEED_REF_MIN_RAD_S,
+                           RS05_SPEED_REF_MAX_RAD_S) == 0U) ||
+        (RS05_ValueInRange(acceleration_rad_s2,
+                           RS05_SPEED_ACCELERATION_MIN_RAD_S2,
+                           RS05_SPEED_ACCELERATION_MAX_RAD_S2) == 0U) ||
+        (RS05_ValueInRange(current_limit_a,
+                           RS05_CURRENT_LIMIT_MIN_A,
+                           RS05_CURRENT_LIMIT_MAX_A) == 0U))
+    {
+        return HAL_ERROR;
+    }
+
+    status = RS05_WriteMotorFloatAndWait(manager, motor,
+                                         RS05_PARAMETER_CURRENT_LIMIT,
+                                         current_limit_a);
+    if (status != HAL_OK)
+    {
+        return status;
+    }
+
+    status = RS05_WriteMotorFloatAndWait(manager, motor,
+                                         RS05_PARAMETER_SPEED_ACCELERATION,
+                                         acceleration_rad_s2);
+    if (status != HAL_OK)
+    {
+        return status;
+    }
+
+    return RS05_WriteMotorFloat(manager, motor,
+                                RS05_PARAMETER_SPEED_REF,
+                                target_speed_rad_s);
+}
+
+HAL_StatusTypeDef RS05_SetCurrentMode(RS05_ManagerTypedef *manager,
+                                      RS05_MotorTypedef *motor,
+                                      float target_current_a)
+{
+    if ((RS05_MotorIsReady(manager, motor) == 0U) ||
+        (RS05_ValueInRange(target_current_a,
+                           RS05_CURRENT_REF_MIN_A,
+                           RS05_CURRENT_REF_MAX_A) == 0U))
+    {
+        return HAL_ERROR;
+    }
+
+    return RS05_WriteMotorFloat(manager, motor,
+                                RS05_PARAMETER_CURRENT_REF,
+                                target_current_a);
+}
+
+HAL_StatusTypeDef RS05_SetPPMode(RS05_ManagerTypedef *manager,
+                                 RS05_MotorTypedef *motor,
+                                 float target_position_rad,
+                                 float max_velocity_rad_s,
+                                 float acceleration_rad_s2,
+                                 float current_limit_a)
+{
+    HAL_StatusTypeDef status;
+
+    if ((RS05_MotorIsReady(manager, motor) == 0U) ||
+        (RS05_ValueInRange(max_velocity_rad_s,
+                           RS05_PP_SPEED_MIN_RAD_S,
+                           RS05_PP_SPEED_MAX_RAD_S) == 0U) ||
+        (RS05_ValueInRange(acceleration_rad_s2,
+                           RS05_PP_ACCELERATION_MIN_RAD_S2,
+                           RS05_PP_ACCELERATION_MAX_RAD_S2) == 0U) ||
+        (RS05_ValueInRange(current_limit_a,
+                           RS05_CURRENT_LIMIT_MIN_A,
+                           RS05_CURRENT_LIMIT_MAX_A) == 0U))
+    {
+        return HAL_ERROR;
+    }
+
+    status = RS05_WriteMotorFloatAndWait(manager, motor,
+                                         RS05_PARAMETER_CURRENT_LIMIT,
+                                         current_limit_a);
+    if (status != HAL_OK)
+    {
+        return status;
+    }
+
+    status = RS05_WriteMotorFloatAndWait(manager, motor,
+                                         RS05_PARAMETER_PP_SPEED,
+                                         max_velocity_rad_s);
+    if (status != HAL_OK)
+    {
+        return status;
+    }
+
+    status = RS05_WriteMotorFloatAndWait(manager, motor,
+                                         RS05_PARAMETER_PP_ACCELERATION,
+                                         acceleration_rad_s2);
+    if (status != HAL_OK)
+    {
+        return status;
+    }
+
+    return RS05_WriteMotorFloat(manager, motor,
+                                RS05_PARAMETER_POSITION_REF,
+                                target_position_rad);
+}
+
+HAL_StatusTypeDef RS05_SetCSPMode(RS05_ManagerTypedef *manager,
+                                  RS05_MotorTypedef *motor,
+                                  float target_position_rad,
+                                  float speed_limit_rad_s,
+                                  float current_limit_a)
+{
+    HAL_StatusTypeDef status;
+
+    if ((RS05_MotorIsReady(manager, motor) == 0U) ||
+        (RS05_ValueInRange(speed_limit_rad_s,
+                           RS05_CSP_SPEED_MIN_RAD_S,
+                           RS05_CSP_SPEED_MAX_RAD_S) == 0U) ||
+        (RS05_ValueInRange(current_limit_a,
+                           RS05_CURRENT_LIMIT_MIN_A,
+                           RS05_CURRENT_LIMIT_MAX_A) == 0U))
+    {
+        return HAL_ERROR;
+    }
+
+    status = RS05_WriteMotorFloatAndWait(manager, motor,
+                                         RS05_PARAMETER_CURRENT_LIMIT,
+                                         current_limit_a);
+    if (status != HAL_OK)
+    {
+        return status;
+    }
+
+    status = RS05_WriteMotorFloatAndWait(manager, motor,
+                                         RS05_PARAMETER_CSP_SPEED_LIMIT,
+                                         speed_limit_rad_s);
+    if (status != HAL_OK)
+    {
+        return status;
+    }
+
+    return RS05_WriteMotorFloat(manager, motor,
+                                RS05_PARAMETER_POSITION_REF,
+                                target_position_rad);
+}
+
+HAL_StatusTypeDef RS05_SetMotionControl(RS05_ManagerTypedef *manager,
+                                        RS05_MotorTypedef *motor,
+                                        float position_rad,
+                                        float velocity_rad_s,
+                                        float kp,
+                                        float kd,
+                                        float torque_ff_nm)
+{
+    if ((RS05_MotorIsReady(manager, motor) == 0U) ||
+        (RS05_ValueInRange(position_rad,
+                           RS05_POSITION_MIN_RAD,
+                           RS05_POSITION_MAX_RAD) == 0U) ||
+        (RS05_ValueInRange(velocity_rad_s,
+                           RS05_VELOCITY_MIN_RAD_S,
+                           RS05_VELOCITY_MAX_RAD_S) == 0U) ||
+        (RS05_ValueInRange(kp, RS05_KP_MIN, RS05_KP_MAX) == 0U) ||
+        (RS05_ValueInRange(kd, RS05_KD_MIN, RS05_KD_MAX) == 0U) ||
+        (RS05_ValueInRange(torque_ff_nm,
+                           RS05_TORQUE_MIN_NM,
+                           RS05_TORQUE_MAX_NM) == 0U))
+    {
+        return HAL_ERROR;
+    }
+
+    return RS05_MotionControl(manager->hcan,
+                              motor->motor_id,
+                              position_rad,
+                              velocity_rad_s,
+                              kp,
+                              kd,
+                              torque_ff_nm);
+}
+
+HAL_StatusTypeDef RS05_SetActiveReport(RS05_ManagerTypedef *manager,
+                                       uint8_t motor_id,
+                                       uint8_t enable)
+{
+    uint8_t data[8] =
+    {
+        0x01U, 0x02U, 0x03U, 0x04U,
+        0x05U, 0x06U, 0x00U, 0x00U
+    };
+
+    if ((manager == NULL) ||
+        (manager->hcan == NULL) ||
+        (enable > 1U))
+    {
+        return HAL_ERROR;
+    }
+
+    data[6] = enable;
+
+    return RS05_SendData(manager->hcan,0x18U,data,RS05_MASTER_ID,motor_id);
+}
+
 void RS05_Manager_ProcessRxFifo0(RS05_ManagerTypedef *manager)
 {
     CAN_RxHeaderTypeDef rx_header;
@@ -293,4 +527,14 @@ void RS05_Manager_ProcessRxFifo0(RS05_ManagerTypedef *manager)
 
         RS05_ProcessFrame(manager, rx_header.ExtId, rx_data);
     }
+}
+
+uint8_t RS05_IsOnline(RS05_MotorTypedef *motor)
+{
+    if (motor == NULL)
+    {
+        return 0U;
+    }
+
+    return (uint8_t)((HAL_GetTick() - motor->last_feedback_tick) < RS05_TIMEOUT_MS);
 }
