@@ -23,6 +23,7 @@
 /* USER CODE BEGIN Includes */
 #include "RS05_app.h"
 #include "RS05_Command.h"
+#include "RS05_receive.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -32,10 +33,17 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define RS05_TEST_POSITION_STEP_RAD  0.5f
-#define RS05_TEST_PP_SPEED_RAD_S     2.0f
-#define RS05_TEST_PP_ACCEL_RAD_S2    5.0f
-#define RS05_TEST_CURRENT_A          2.0f
+#define RS05_MIT_TEST_AMPLITUDE_RAD     0.3f
+#define RS05_MIT_TEST_KP                5.0f
+#define RS05_MIT_TEST_KD                0.3f
+#define RS05_MIT_TEST_PERIOD_MS         10U
+#define RS05_MIT_TEST_SWITCH_MS         2000U
+#define RS05_MIT_FEEDBACK_TIMEOUT_MS    100U
+#define RS05_PRIVATE_COMM_SET_PROTOCOL  0x19U
+#define RS05_PROTOCOL_MIT               2U
+#define RS05_TEST_STAGE_INIT             0U
+#define RS05_TEST_STAGE_NEED_POWER_CYCLE 1U
+#define RS05_TEST_STAGE_RUNNING          2U
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -49,12 +57,19 @@ CAN_HandleTypeDef hcan1;
 UART_HandleTypeDef huart6;
 
 /* USER CODE BEGIN PV */
-static RS05_MotorTypedef RS05_Motor1 = {
+static RS05_ManagerTypedef RS05_Manager;
+static RS05_MIT_MotorTypedef RS05_MIT_Motor1 = {
   .motor_id = RS05_MOTOR_ID,
 };
-static RS05_ManagerTypedef RS05_Manager;
+static RS05_MIT_MotorTypedef *const RS05_MIT_Motors[] = {
+  &RS05_MIT_Motor1,
+};
 static volatile HAL_StatusTypeDef RS05_LastStatus = HAL_OK;
-static volatile float RS05_TargetPositionRad = 3.0f;
+static float RS05_StartPositionRad;
+static float RS05_TargetPositionRad;
+static int8_t RS05_TestDirection = 1;
+static uint32_t RS05_LastSwitchTick;
+static volatile uint8_t RS05_TestStage = RS05_TEST_STAGE_INIT;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -68,6 +83,30 @@ static void MX_USART6_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static HAL_StatusTypeDef RS05_RequestMITProtocol(void)
+{
+  const uint8_t data[8] = {
+    0x01U, 0x02U, 0x03U, 0x04U,
+    0x05U, 0x06U, RS05_PROTOCOL_MIT, 0x00U
+  };
+
+  return RS05_SendData(&hcan1,
+                       RS05_PRIVATE_COMM_SET_PROTOCOL,
+                       data,
+                       RS05_MASTER_ID,
+                       RS05_MOTOR_ID);
+}
+
+static uint8_t RS05_WaitMITFeedback(uint32_t timeout_ms)
+{
+  uint32_t start = HAL_GetTick();
+
+  while ((RS05_MIT_Motor1.last_feedback_tick == 0U) &&
+         ((HAL_GetTick() - start) < timeout_ms))
+  {
+  }
+  return (uint8_t)(RS05_MIT_Motor1.last_feedback_tick != 0U);
+}
 /* USER CODE END 0 */
 
 /**
@@ -103,12 +142,6 @@ int main(void)
   MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
   RS05_Manager_Init(&RS05_Manager, &hcan1);
-  RS05_LastStatus = RS05_Manager_RegisterMotor(&RS05_Manager, &RS05_Motor1);
-  if (RS05_LastStatus != HAL_OK)
-  {
-    Error_Handler();
-  }
-
   RS05_LastStatus = CAN_Init(&hcan1);
   if (RS05_LastStatus != HAL_OK)
   {
@@ -118,41 +151,47 @@ int main(void)
 
   HAL_Delay(1000U);
 
-  RS05_LastStatus = RS05_Stop(&hcan1, RS05_MASTER_ID, RS05_MOTOR_ID);
+  RS05_MIT_Motor1.last_feedback_tick = 0U;
+  RS05_LastStatus = RS05_MIT_Stop(&hcan1, RS05_MOTOR_ID);
+  if (RS05_LastStatus != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  if (RS05_WaitMITFeedback(RS05_MIT_FEEDBACK_TIMEOUT_MS) == 0U)
+  {
+    RS05_LastStatus = RS05_RequestMITProtocol();
+    if (RS05_LastStatus != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    RS05_TestStage = RS05_TEST_STAGE_NEED_POWER_CYCLE;
+    while (1)
+    {
+      HAL_Delay(100U);
+    }
+  }
+
+  RS05_LastStatus = RS05_MIT_SetRunMode(&hcan1,
+                                        RS05_MOTOR_ID,
+                                        RS05_MIT_RUN_MODE_MIT);
   if (RS05_LastStatus != HAL_OK)
   {
     Error_Handler();
   }
   HAL_Delay(20U);
 
-  if (RS05_Motor1.last_feedback_tick == 0U)
-  {
-    Error_Handler();
-  }
-  RS05_TargetPositionRad = RS05_Motor1.position_rad +
-                           RS05_TEST_POSITION_STEP_RAD;
-
-  RS05_LastStatus = RS05_SetMode(&RS05_Manager,
-                                 &RS05_Motor1,
-                                 RS05_MODE_SPEED);
+  RS05_LastStatus = RS05_MIT_Enable(&hcan1, RS05_MOTOR_ID);
   if (RS05_LastStatus != HAL_OK)
   {
     Error_Handler();
   }
-  HAL_Delay(20U);
 
-  RS05_LastStatus = RS05_Enable(&hcan1, RS05_MASTER_ID, RS05_MOTOR_ID);
-  if (RS05_LastStatus != HAL_OK)
-  {
-    Error_Handler();
-  }
-  HAL_Delay(20U);
-
-
-  if (RS05_LastStatus != HAL_OK)
-  {
-    Error_Handler();
-  }
+  RS05_StartPositionRad = RS05_MIT_Motor1.position_rad;
+  RS05_TargetPositionRad = RS05_StartPositionRad;
+  RS05_LastSwitchTick = HAL_GetTick();
+  RS05_TestStage = RS05_TEST_STAGE_RUNNING;
 
 /* USER CODE END 2 */
 
@@ -160,13 +199,45 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    RS05_LastStatus = RS05_SetSpeedMode(&RS05_Manager,&RS05_Motor1,5.0f,2.0f,2.0f);
+    uint32_t now = HAL_GetTick();
 
+    if ((now - RS05_MIT_Motor1.last_feedback_tick) >
+        RS05_MIT_FEEDBACK_TIMEOUT_MS)
+    {
+      (void)RS05_MIT_Stop(&hcan1, RS05_MOTOR_ID);
+      Error_Handler();
+    }
 
+    if ((now - RS05_LastSwitchTick) >= RS05_MIT_TEST_SWITCH_MS)
+    {
+      RS05_TargetPositionRad = RS05_StartPositionRad +
+          (float)RS05_TestDirection * RS05_MIT_TEST_AMPLITUDE_RAD;
+      if (RS05_TargetPositionRad > RS05_MIT_POSITION_MAX_RAD)
+      {
+        RS05_TargetPositionRad = RS05_MIT_POSITION_MAX_RAD;
+      }
+      else if (RS05_TargetPositionRad < RS05_MIT_POSITION_MIN_RAD)
+      {
+        RS05_TargetPositionRad = RS05_MIT_POSITION_MIN_RAD;
+      }
+      RS05_TestDirection = (int8_t)-RS05_TestDirection;
+      RS05_LastSwitchTick = now;
+    }
 
+    RS05_LastStatus = RS05_MIT_Control(&hcan1,
+                                       RS05_MOTOR_ID,
+                                       RS05_TargetPositionRad,
+                                       0.0f,
+                                       RS05_MIT_TEST_KP,
+                                       RS05_MIT_TEST_KD,
+                                       0.0f);
+    if (RS05_LastStatus == HAL_ERROR)
+    {
+      (void)RS05_MIT_Stop(&hcan1, RS05_MOTOR_ID);
+      Error_Handler();
+    }
 
-
-    HAL_Delay(100);
+    HAL_Delay(RS05_MIT_TEST_PERIOD_MS);
     /* USER CODE END WHILE */
     /* USER CODE BEGIN 3 */
   }
@@ -315,7 +386,11 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
   if (hcan == RS05_Manager.hcan)
   {
-    RS05_Manager_ProcessRxFifo0(&RS05_Manager);
+    RS05_ProcessRxFifo0(&RS05_Manager,
+                        RS05_MASTER_ID,
+                        RS05_MIT_Motors,
+                        (uint8_t)(sizeof(RS05_MIT_Motors) /
+                                  sizeof(RS05_MIT_Motors[0])));
   }
 }
 

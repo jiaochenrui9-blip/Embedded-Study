@@ -49,6 +49,11 @@ HAL_StatusTypeDef RS05_SendData(CAN_HandleTypeDef *hcan,
                                 uint16_t data2,
                                 uint8_t motor_id)
 {
+    if ((hcan == NULL) || (data == NULL))
+    {
+        return HAL_ERROR;
+    }
+
     return CAN_SendExtFrame(hcan,
                             RS05_BuildExtId(comm_type, data2, motor_id),
                             data,
@@ -496,37 +501,6 @@ HAL_StatusTypeDef RS05_SetActiveReport(RS05_ManagerTypedef *manager,
     data[6] = enable;
 
     return RS05_SendData(manager->hcan,0x18U,data,RS05_MASTER_ID,motor_id);
-}
-
-void RS05_Manager_ProcessRxFifo0(RS05_ManagerTypedef *manager)
-{
-    CAN_RxHeaderTypeDef rx_header;
-    HAL_StatusTypeDef status;
-    uint8_t rx_data[8];
-
-    if ((manager == NULL) || (manager->hcan == NULL))
-    {
-        return;
-    }
-
-    while (HAL_CAN_GetRxFifoFillLevel(manager->hcan, CAN_RX_FIFO0) > 0U)
-    {
-        status = HAL_CAN_GetRxMessage(manager->hcan, CAN_RX_FIFO0,
-                                       &rx_header, rx_data);
-        if (status != HAL_OK)
-        {
-            break;
-        }
-
-        if ((rx_header.IDE != CAN_ID_EXT) ||
-            (rx_header.RTR != CAN_RTR_DATA) ||
-            (rx_header.DLC != 8U))
-        {
-            continue;
-        }
-
-        RS05_ProcessFrame(manager, rx_header.ExtId, rx_data);
-    }
 }
 
 uint8_t RS05_IsOnline(RS05_MotorTypedef *motor)

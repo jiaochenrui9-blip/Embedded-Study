@@ -111,8 +111,6 @@ HAL_StatusTypeDef RS05_SetMotionControl(RS05_ManagerTypedef *manager,
 void RS05_Manager_Init(RS05_ManagerTypedef *manager, CAN_HandleTypeDef *hcan);
 HAL_StatusTypeDef RS05_Manager_RegisterMotor(RS05_ManagerTypedef *manager,
                                               RS05_MotorTypedef *motor);
-void RS05_Manager_ProcessRxFifo0(RS05_ManagerTypedef *manager);
-
 uint8_t RS05_IsOnline(RS05_MotorTypedef *motor);
 
 #endif // RS05_RS05_APP_H
