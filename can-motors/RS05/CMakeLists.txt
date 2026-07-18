@@ -43,7 +43,9 @@ add_executable(${CMAKE_PROJECT_NAME}
     Core/Inc/RS05_receive.h
     Core/Src/RS05_parameter.c
     Core/Inc/RS05_parameter.h
-    Core/Inc/RS05_Command.h)
+    Core/Inc/RS05_Command.h
+    Core/Src/RS05_mit.c
+    Core/Inc/RS05_mit.h)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
