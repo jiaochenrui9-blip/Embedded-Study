@@ -126,3 +126,44 @@ void RS05_ProcessFrame(RS05_ManagerTypedef *manager,
             break;
     }
 }
+
+void RS05_ProcessRxFifo0(RS05_ManagerTypedef *manager,
+                         uint8_t mit_master_id,
+                         RS05_MIT_MotorTypedef *const mit_motors[],
+                         uint8_t mit_motor_count)
+{
+    CAN_RxHeaderTypeDef header;
+    uint8_t data[8];
+
+    if ((manager == NULL) || (manager->hcan == NULL))
+    {
+        return;
+    }
+
+    while (HAL_CAN_GetRxFifoFillLevel(manager->hcan, CAN_RX_FIFO0) > 0U)
+    {
+        if (HAL_CAN_GetRxMessage(manager->hcan, CAN_RX_FIFO0,
+                                &header, data) != HAL_OK)
+        {
+            break;
+        }
+
+        if ((header.RTR != CAN_RTR_DATA) || (header.DLC != 8U))
+        {
+            continue;
+        }
+
+        if (header.IDE == CAN_ID_EXT)
+        {
+            RS05_ProcessFrame(manager, header.ExtId, data);
+        }
+        else if ((header.IDE == CAN_ID_STD) && (mit_motors != NULL))
+        {
+            (void)RS05_MIT_ProcessFrame(mit_master_id,
+                                        mit_motors,
+                                        mit_motor_count,
+                                        (uint16_t)header.StdId,
+                                        data);
+        }
+    }
+}
