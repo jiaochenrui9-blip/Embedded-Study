@@ -14,9 +14,10 @@ void RS05_ParseParameterReply(RS05_MotorTypedef *motor,
 void RS05_ProcessFrame(RS05_ManagerTypedef *manager,
                        uint32_t ext_id,
                        const uint8_t data[8]);
-void RS05_ProcessRxFifo0(RS05_ManagerTypedef *manager,
-                         uint8_t mit_master_id,
-                         RS05_MIT_MotorTypedef *const mit_motors[],
-                         uint8_t mit_motor_count);
+void RS05_ProcessRxFifo0(RS05_ManagerTypedef *private_manager,
+                         RS05_MIT_ManagerTypedef *mit_manager);
+
+RS05_ParameterCache *RS05_FindParameterCache(RS05_MotorTypedef *motor,
+                                              uint16_t index);
 
 #endif /* RS05_RECEIVE_H */

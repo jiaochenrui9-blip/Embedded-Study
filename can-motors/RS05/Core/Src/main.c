@@ -58,11 +58,12 @@ UART_HandleTypeDef huart6;
 
 /* USER CODE BEGIN PV */
 static RS05_ManagerTypedef RS05_Manager;
-static RS05_MIT_MotorTypedef RS05_MIT_Motor1 = {
+static RS05_MIT_ManagerTypedef RS05_MIT_Manager;
+static RS05_MotorTypedef RS05_Motor1 = {
   .motor_id = RS05_MOTOR_ID,
 };
-static RS05_MIT_MotorTypedef *const RS05_MIT_Motors[] = {
-  &RS05_MIT_Motor1,
+static RS05_MIT_MotorTypedef RS05_MIT_Motor1 = {
+  .motor_id = RS05_MOTOR_ID,
 };
 static volatile HAL_StatusTypeDef RS05_LastStatus = HAL_OK;
 static float RS05_StartPositionRad;
@@ -93,7 +94,7 @@ static HAL_StatusTypeDef RS05_RequestMITProtocol(void)
   return RS05_SendData(&hcan1,
                        RS05_PRIVATE_COMM_SET_PROTOCOL,
                        data,
-                       RS05_MASTER_ID,
+                       RS05_Manager.master_id,
                        RS05_MOTOR_ID);
 }
 
@@ -141,7 +142,22 @@ int main(void)
   MX_CAN1_Init();
   MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
-  RS05_Manager_Init(&RS05_Manager, &hcan1);
+  RS05_Manager_Init(&RS05_Manager, &hcan1, RS05_MASTER_ID);
+  RS05_MIT_Manager_Init(&RS05_MIT_Manager, &hcan1, RS05_MASTER_ID);
+  RS05_LastStatus = RS05_Manager_RegisterMotor(&RS05_Manager,
+                                                &RS05_Motor1);
+  if (RS05_LastStatus != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  RS05_LastStatus = RS05_MIT_Manager_RegisterMotor(&RS05_MIT_Manager,
+                                                    &RS05_MIT_Motor1);
+  if (RS05_LastStatus != HAL_OK)
+  {
+    Error_Handler();
+  }
+
   RS05_LastStatus = CAN_Init(&hcan1);
   if (RS05_LastStatus != HAL_OK)
   {
@@ -152,7 +168,7 @@ int main(void)
   HAL_Delay(1000U);
 
   RS05_MIT_Motor1.last_feedback_tick = 0U;
-  RS05_LastStatus = RS05_MIT_Stop(&hcan1, RS05_MOTOR_ID);
+  RS05_LastStatus = RS05_MIT_Stop(&RS05_MIT_Manager, RS05_MOTOR_ID);
   if (RS05_LastStatus != HAL_OK)
   {
     Error_Handler();
@@ -173,7 +189,7 @@ int main(void)
     }
   }
 
-  RS05_LastStatus = RS05_MIT_SetRunMode(&hcan1,
+  RS05_LastStatus = RS05_MIT_SetRunMode(&RS05_MIT_Manager,
                                         RS05_MOTOR_ID,
                                         RS05_MIT_RUN_MODE_MIT);
   if (RS05_LastStatus != HAL_OK)
@@ -182,7 +198,7 @@ int main(void)
   }
   HAL_Delay(20U);
 
-  RS05_LastStatus = RS05_MIT_Enable(&hcan1, RS05_MOTOR_ID);
+  RS05_LastStatus = RS05_MIT_Enable(&RS05_MIT_Manager, RS05_MOTOR_ID);
   if (RS05_LastStatus != HAL_OK)
   {
     Error_Handler();
@@ -204,7 +220,7 @@ int main(void)
     if ((now - RS05_MIT_Motor1.last_feedback_tick) >
         RS05_MIT_FEEDBACK_TIMEOUT_MS)
     {
-      (void)RS05_MIT_Stop(&hcan1, RS05_MOTOR_ID);
+      (void)RS05_MIT_Stop(&RS05_MIT_Manager, RS05_MOTOR_ID);
       Error_Handler();
     }
 
@@ -224,7 +240,7 @@ int main(void)
       RS05_LastSwitchTick = now;
     }
 
-    RS05_LastStatus = RS05_MIT_Control(&hcan1,
+    RS05_LastStatus = RS05_MIT_Control(&RS05_MIT_Manager,
                                        RS05_MOTOR_ID,
                                        RS05_TargetPositionRad,
                                        0.0f,
@@ -233,7 +249,7 @@ int main(void)
                                        0.0f);
     if (RS05_LastStatus == HAL_ERROR)
     {
-      (void)RS05_MIT_Stop(&hcan1, RS05_MOTOR_ID);
+      (void)RS05_MIT_Stop(&RS05_MIT_Manager, RS05_MOTOR_ID);
       Error_Handler();
     }
 
@@ -387,10 +403,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
   if (hcan == RS05_Manager.hcan)
   {
     RS05_ProcessRxFifo0(&RS05_Manager,
-                        RS05_MASTER_ID,
-                        RS05_MIT_Motors,
-                        (uint8_t)(sizeof(RS05_MIT_Motors) /
-                                  sizeof(RS05_MIT_Motors[0])));
+                        &RS05_MIT_Manager);
   }
 }
 

@@ -25,6 +25,7 @@ typedef struct
     uint16_t index;
     RS05_ParameterType type;
     RS05_ParameterValue value;
+    uint32_t last_update_tick;
     uint8_t valid;
 } RS05_ParameterCache;
 

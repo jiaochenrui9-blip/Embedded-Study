@@ -120,7 +120,9 @@ HAL_StatusTypeDef RS05_Stop(CAN_HandleTypeDef *hcan,
 }
 
 
-void RS05_Manager_Init(RS05_ManagerTypedef *manager, CAN_HandleTypeDef *hcan)
+void RS05_Manager_Init(RS05_ManagerTypedef *manager,
+                       CAN_HandleTypeDef *hcan,
+                       uint8_t master_id)
 {
     if (manager == NULL)
     {
@@ -129,6 +131,7 @@ void RS05_Manager_Init(RS05_ManagerTypedef *manager, CAN_HandleTypeDef *hcan)
 
     memset(manager, 0, sizeof(*manager));
     manager->hcan = hcan;
+    manager->master_id = master_id;
 }
 
 HAL_StatusTypeDef RS05_Manager_RegisterMotor(RS05_ManagerTypedef *manager,
@@ -168,7 +171,7 @@ static HAL_StatusTypeDef RS05_WriteParameterRaw(RS05_ManagerTypedef *manager,
     return RS05_SendData(manager->hcan,
                          RS05_COMM_TYPE_WRITE_PARAMETER,
                          data,
-                         RS05_MASTER_ID,
+                         manager->master_id,
                          motor_id);
 }
 
@@ -188,7 +191,7 @@ HAL_StatusTypeDef RS05_Command_ParaRead(RS05_ManagerTypedef *manager,
     return RS05_SendData(manager->hcan,
                          RS05_COMM_TYPE_READ_PARAMETER,
                          data,
-                         RS05_MASTER_ID,
+                         manager->master_id,
                          motor_id);
 
 }
@@ -480,7 +483,15 @@ HAL_StatusTypeDef RS05_SetMotionControl(RS05_ManagerTypedef *manager,
                               kd,
                               torque_ff_nm);
 }
+uint8_t RS05_CheckIfFault(const RS05_MotorTypedef *motor)
+{
+    if (motor == NULL)
+    {
+        return 0U;
+    }
 
+    return (uint8_t)(motor->fault_flags != RS05_FAULT_NONE);
+}
 HAL_StatusTypeDef RS05_SetActiveReport(RS05_ManagerTypedef *manager,
                                        uint8_t motor_id,
                                        uint8_t enable)
@@ -500,12 +511,15 @@ HAL_StatusTypeDef RS05_SetActiveReport(RS05_ManagerTypedef *manager,
 
     data[6] = enable;
 
-    return RS05_SendData(manager->hcan,0x18U,data,RS05_MASTER_ID,motor_id);
+    return RS05_SendData(manager->hcan, 0x18U, data,
+                         manager->master_id, motor_id);
 }
 
-uint8_t RS05_IsOnline(RS05_MotorTypedef *motor)
+
+
+uint8_t RS05_IsOnline(const RS05_MotorTypedef *motor)
 {
-    if (motor == NULL)
+    if ((motor == NULL) || (motor->last_feedback_tick == 0U))
     {
         return 0U;
     }

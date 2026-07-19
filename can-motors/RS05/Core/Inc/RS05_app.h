@@ -8,6 +8,30 @@
 #include "CAN_bus.h"
 #include "RS05_parameter.h"
 #include "RS05_Command.h"
+typedef uint8_t RS05_FaultFlags;
+typedef enum
+{
+    RS05_FAULT_NONE                  = 0U,
+
+    /* 扩展 ID bit16，对应 fault_flags bit0 */
+    RS05_FAULT_UNDERVOLTAGE          = (1U << 0),
+
+    /* 扩展 ID bit17，对应 fault_flags bit1 */
+    RS05_FAULT_PHASE_OVERCURRENT     = (1U << 1),
+
+    /* 扩展 ID bit18，对应 fault_flags bit2 */
+    RS05_FAULT_OVERTEMPERATURE       = (1U << 2),
+
+    /* 扩展 ID bit19，对应 fault_flags bit3 */
+    RS05_FAULT_MAGNETIC_ENCODER      = (1U << 3),
+
+    /* 扩展 ID bit20，对应 fault_flags bit4 */
+    RS05_FAULT_STALL_OVERLOAD        = (1U << 4),
+
+     /*暂时保留*/
+    RS05_FAULT_RESERVED_BIT5         = (1U << 5)
+
+} RS05_FaultFlag;
 
 typedef struct
 {
@@ -20,17 +44,20 @@ typedef struct
      float temperature_c;
 
      uint8_t state;
-     uint8_t fault;
+     RS05_FaultFlags fault_flags;
+
      uint32_t last_feedback_tick;
 
-    /* Type 17 参数读取响应，协议中的浮点值采用小端字节序。 */
-    RS05_ParameterCache parameter;
+    /* Type 17 参数读取响应数组，最多保存10个参数的最新数值，协议中的浮点值采用小端字节序。 */
+    RS05_ParameterCache parameters[RS05_PARAMETER_CACHE_COUNT];
 
 } RS05_MotorTypedef;
+
 
 typedef struct
 {
     CAN_HandleTypeDef *hcan;
+    uint8_t master_id;
     RS05_MotorTypedef *motors[RS05_MOTOR_MAX_COUNT];
     uint8_t num_motors;
 } RS05_ManagerTypedef;
@@ -108,9 +135,11 @@ HAL_StatusTypeDef RS05_SetMotionControl(RS05_ManagerTypedef *manager,
                                         float kd,
                                         float torque_ff_nm);
 
-void RS05_Manager_Init(RS05_ManagerTypedef *manager, CAN_HandleTypeDef *hcan);
+void RS05_Manager_Init(RS05_ManagerTypedef *manager,
+                       CAN_HandleTypeDef *hcan,
+                       uint8_t master_id);
 HAL_StatusTypeDef RS05_Manager_RegisterMotor(RS05_ManagerTypedef *manager,
                                               RS05_MotorTypedef *motor);
-uint8_t RS05_IsOnline(RS05_MotorTypedef *motor);
-
+uint8_t RS05_IsOnline(const RS05_MotorTypedef *motor);
+uint8_t RS05_CheckIfFault(const RS05_MotorTypedef *motor);
 #endif // RS05_RS05_APP_H

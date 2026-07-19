@@ -36,7 +36,14 @@ static float RS05_MIT_UintToFloat(uint16_t value,
     return ((float)value * (maximum - minimum) / (float)span) + minimum;
 }
 
-static HAL_StatusTypeDef RS05_MIT_SendSpecial(CAN_HandleTypeDef *hcan,
+static uint8_t RS05_MIT_Manager_IsValid(
+    const RS05_MIT_ManagerTypedef *manager)
+{
+    return (uint8_t)((manager != NULL) && (manager->hcan != NULL));
+}
+
+static HAL_StatusTypeDef RS05_MIT_SendSpecial(
+                                               RS05_MIT_ManagerTypedef *manager,
                                                uint8_t motor_id,
                                                uint8_t argument,
                                                uint8_t opcode)
@@ -46,26 +53,31 @@ static HAL_StatusTypeDef RS05_MIT_SendSpecial(CAN_HandleTypeDef *hcan,
         0xFFU, 0xFFU, argument, opcode
     };
 
-    return CAN_SendStdFrame(hcan, motor_id, data, 8U);
+    if (!RS05_MIT_Manager_IsValid(manager))
+    {
+        return HAL_ERROR;
+    }
+
+    return CAN_SendStdFrame(manager->hcan, motor_id, data, 8U);
 }
 
-static RS05_MIT_MotorTypedef *RS05_MIT_FindMotor(
-    RS05_MIT_MotorTypedef *const motors[],
-    uint8_t motor_count,
+RS05_MIT_MotorTypedef *RS05_MIT_Manager_FindMotor(
+    const RS05_MIT_ManagerTypedef *manager,
     uint8_t motor_id)
 {
     uint8_t i;
 
-    if (motors == NULL)
+    if (manager == NULL)
     {
         return NULL;
     }
 
-    for (i = 0U; i < motor_count; ++i)
+    for (i = 0U; i < manager->num_motors; ++i)
     {
-        if ((motors[i] != NULL) && (motors[i]->motor_id == motor_id))
+        if ((manager->motors[i] != NULL) &&
+            (manager->motors[i]->motor_id == motor_id))
         {
-            return motors[i];
+            return manager->motors[i];
         }
     }
 
@@ -75,6 +87,36 @@ static RS05_MIT_MotorTypedef *RS05_MIT_FindMotor(
 static uint8_t RS05_MIT_DeadlineReached(uint32_t now, uint32_t deadline)
 {
     return (uint8_t)((int32_t)(now - deadline) >= 0);
+}
+
+void RS05_MIT_Manager_Init(RS05_MIT_ManagerTypedef *manager,
+                           CAN_HandleTypeDef *hcan,
+                           uint8_t master_id)
+{
+    if (manager == NULL)
+    {
+        return;
+    }
+
+    memset(manager, 0, sizeof(*manager));
+    manager->hcan = hcan;
+    manager->master_id = master_id;
+}
+
+HAL_StatusTypeDef RS05_MIT_Manager_RegisterMotor(
+    RS05_MIT_ManagerTypedef *manager,
+    RS05_MIT_MotorTypedef *motor)
+{
+    if ((manager == NULL) || (motor == NULL) ||
+        (manager->num_motors >= RS05_MIT_MOTOR_MAX_COUNT) ||
+        (RS05_MIT_Manager_FindMotor(manager, motor->motor_id) != NULL))
+    {
+        return HAL_ERROR;
+    }
+
+    manager->motors[manager->num_motors] = motor;
+    ++manager->num_motors;
+    return HAL_OK;
 }
 
 uint16_t RS05_MIT_BuildStdId(uint8_t frame_type, uint8_t motor_id)
@@ -169,9 +211,7 @@ HAL_StatusTypeDef RS05_MIT_ParseFeedback(RS05_MIT_MotorTypedef *motor,
 }
 
 HAL_StatusTypeDef RS05_MIT_ProcessFrame(
-    uint8_t master_id,
-    RS05_MIT_MotorTypedef *const motors[],
-    uint8_t motor_count,
+    RS05_MIT_ManagerTypedef *manager,
     uint16_t std_id,
     const uint8_t data[8])
 {
@@ -179,14 +219,15 @@ HAL_StatusTypeDef RS05_MIT_ProcessFrame(
     uint8_t frame_type;
     uint32_t now;
 
-    if ((motors == NULL) || (data == NULL) || (std_id > 0x07FFU))
+    if (!RS05_MIT_Manager_IsValid(manager) ||
+        (data == NULL) || (std_id > 0x07FFU))
     {
         return HAL_ERROR;
     }
 
-    if (std_id == master_id)
+    if (std_id == manager->master_id)
     {
-        motor = RS05_MIT_FindMotor(motors, motor_count, data[0]);
+        motor = RS05_MIT_Manager_FindMotor(manager, data[0]);
         if (motor == NULL)
         {
             return HAL_ERROR;
@@ -211,8 +252,8 @@ HAL_StatusTypeDef RS05_MIT_ProcessFrame(
     }
 
     frame_type = (uint8_t)((std_id >> 8) & 0x07U);
-    motor = RS05_MIT_FindMotor(motors, motor_count,
-                               (uint8_t)(std_id & 0xFFU));
+    motor = RS05_MIT_Manager_FindMotor(manager,
+                                      (uint8_t)(std_id & 0xFFU));
     if (motor == NULL)
     {
         return HAL_ERROR;
@@ -229,25 +270,28 @@ HAL_StatusTypeDef RS05_MIT_ProcessFrame(
     return HAL_OK;
 }
 
-HAL_StatusTypeDef RS05_MIT_Enable(CAN_HandleTypeDef *hcan, uint8_t motor_id)
+HAL_StatusTypeDef RS05_MIT_Enable(RS05_MIT_ManagerTypedef *manager,
+                                  uint8_t motor_id)
 {
-    return RS05_MIT_SendSpecial(hcan, motor_id, 0xFFU,
+    return RS05_MIT_SendSpecial(manager, motor_id, 0xFFU,
                                 RS05_MIT_OPCODE_ENABLE_OR_MODE);
 }
 
-HAL_StatusTypeDef RS05_MIT_Stop(CAN_HandleTypeDef *hcan, uint8_t motor_id)
+HAL_StatusTypeDef RS05_MIT_Stop(RS05_MIT_ManagerTypedef *manager,
+                                uint8_t motor_id)
 {
-    return RS05_MIT_SendSpecial(hcan, motor_id, 0xFFU,
+    return RS05_MIT_SendSpecial(manager, motor_id, 0xFFU,
                                 RS05_MIT_OPCODE_STOP);
 }
 
-HAL_StatusTypeDef RS05_MIT_SetZero(CAN_HandleTypeDef *hcan, uint8_t motor_id)
+HAL_StatusTypeDef RS05_MIT_SetZero(RS05_MIT_ManagerTypedef *manager,
+                                   uint8_t motor_id)
 {
-    return RS05_MIT_SendSpecial(hcan, motor_id, 0xFFU,
+    return RS05_MIT_SendSpecial(manager, motor_id, 0xFFU,
                                 RS05_MIT_OPCODE_ZERO);
 }
 
-HAL_StatusTypeDef RS05_MIT_SetRunMode(CAN_HandleTypeDef *hcan,
+HAL_StatusTypeDef RS05_MIT_SetRunMode(RS05_MIT_ManagerTypedef *manager,
                                       uint8_t motor_id,
                                       RS05_MIT_RunMode mode)
 {
@@ -256,11 +300,11 @@ HAL_StatusTypeDef RS05_MIT_SetRunMode(CAN_HandleTypeDef *hcan,
         return HAL_ERROR;
     }
 
-    return RS05_MIT_SendSpecial(hcan, motor_id, (uint8_t)mode,
+    return RS05_MIT_SendSpecial(manager, motor_id, (uint8_t)mode,
                                 RS05_MIT_OPCODE_ENABLE_OR_MODE);
 }
 
-HAL_StatusTypeDef RS05_MIT_Control(CAN_HandleTypeDef *hcan,
+HAL_StatusTypeDef RS05_MIT_Control(RS05_MIT_ManagerTypedef *manager,
                                    uint8_t motor_id,
                                    float position_rad,
                                    float velocity_rad_s,
@@ -278,52 +322,67 @@ HAL_StatusTypeDef RS05_MIT_Control(CAN_HandleTypeDef *hcan,
         return status;
     }
 
-    return CAN_SendStdFrame(hcan, motor_id, data, 8U);
+    if (!RS05_MIT_Manager_IsValid(manager))
+    {
+        return HAL_ERROR;
+    }
+
+    return CAN_SendStdFrame(manager->hcan, motor_id, data, 8U);
 }
 
-HAL_StatusTypeDef RS05_MIT_PositionControl(CAN_HandleTypeDef *hcan,
+HAL_StatusTypeDef RS05_MIT_PositionControl(RS05_MIT_ManagerTypedef *manager,
                                            uint8_t motor_id,
                                            float position_rad,
                                            float velocity_rad_s)
 {
     uint8_t data[8];
 
+    if (!RS05_MIT_Manager_IsValid(manager))
+    {
+        return HAL_ERROR;
+    }
+
     RS05_Codec_WriteFloatLE(&data[0], position_rad);
     RS05_Codec_WriteFloatLE(&data[4], velocity_rad_s);
-    return CAN_SendStdFrame(hcan,
+    return CAN_SendStdFrame(manager->hcan,
                             RS05_MIT_BuildStdId(RS05_MIT_FRAME_POSITION,
                                                 motor_id),
                             data, 8U);
 }
 
-HAL_StatusTypeDef RS05_MIT_SpeedControl(CAN_HandleTypeDef *hcan,
+HAL_StatusTypeDef RS05_MIT_SpeedControl(RS05_MIT_ManagerTypedef *manager,
                                         uint8_t motor_id,
                                         float velocity_rad_s,
                                         float current_limit_a)
 {
     uint8_t data[8];
 
+    if (!RS05_MIT_Manager_IsValid(manager))
+    {
+        return HAL_ERROR;
+    }
+
     RS05_Codec_WriteFloatLE(&data[0], velocity_rad_s);
     RS05_Codec_WriteFloatLE(&data[4], current_limit_a);
-    return CAN_SendStdFrame(hcan,
+    return CAN_SendStdFrame(manager->hcan,
                             RS05_MIT_BuildStdId(RS05_MIT_FRAME_SPEED,
                                                 motor_id),
                             data, 8U);
 }
 
-HAL_StatusTypeDef RS05_MIT_ReadFault(CAN_HandleTypeDef *hcan,
+HAL_StatusTypeDef RS05_MIT_ReadFault(RS05_MIT_ManagerTypedef *manager,
                                      RS05_MIT_MotorTypedef *motor)
 {
     uint32_t now;
     HAL_StatusTypeDef status;
 
-    if (motor == NULL)
+    if (!RS05_MIT_Manager_IsValid(manager) || (motor == NULL))
     {
         return HAL_ERROR;
     }
 
     now = HAL_GetTick();
-    status = RS05_MIT_SendSpecial(hcan, motor->motor_id, 0x00U,
+    status = RS05_MIT_SendSpecial(manager, motor->motor_id, 0x00U,
                                   RS05_MIT_OPCODE_FAULT);
     if (status == HAL_OK)
     {
@@ -332,7 +391,7 @@ HAL_StatusTypeDef RS05_MIT_ReadFault(CAN_HandleTypeDef *hcan,
     return status;
 }
 
-HAL_StatusTypeDef RS05_MIT_SetActiveReport(CAN_HandleTypeDef *hcan,
+HAL_StatusTypeDef RS05_MIT_SetActiveReport(RS05_MIT_ManagerTypedef *manager,
                                            uint8_t motor_id,
                                            uint8_t enable)
 {
@@ -341,41 +400,92 @@ HAL_StatusTypeDef RS05_MIT_SetActiveReport(CAN_HandleTypeDef *hcan,
         return HAL_ERROR;
     }
 
-    return RS05_MIT_SendSpecial(hcan, motor_id, enable,
+    return RS05_MIT_SendSpecial(manager, motor_id, enable,
                                 RS05_MIT_OPCODE_ACTIVE_REPORT);
 }
 
-HAL_StatusTypeDef RS05_MIT_ReadParameter(CAN_HandleTypeDef *hcan,
+HAL_StatusTypeDef RS05_MIT_ReadParameter(RS05_MIT_ManagerTypedef *manager,
                                          uint8_t motor_id,
                                          uint16_t index)
 {
     uint8_t data[8] = {0U};
 
-    RS05_Codec_WriteU16LE(data, index);
-    return CAN_SendStdFrame(hcan,
-                            RS05_MIT_BuildStdId(
-                                RS05_MIT_FRAME_READ_PARAMETER, motor_id),
-                            data, 8U);
-}
-
-HAL_StatusTypeDef RS05_MIT_WriteParameter(CAN_HandleTypeDef *hcan,
-                                          uint8_t motor_id,
-                                          uint16_t index,
-                                          const uint8_t value[4])
-{
-    uint8_t data[8] = {0U};
-
-    if (value == NULL)
+    if (!RS05_MIT_Manager_IsValid(manager))
     {
         return HAL_ERROR;
     }
 
     RS05_Codec_WriteU16LE(data, index);
+    return CAN_SendStdFrame(manager->hcan,
+                            RS05_MIT_BuildStdId(
+                                RS05_MIT_FRAME_READ_PARAMETER, motor_id),
+                            data, 8U);
+}
+
+HAL_StatusTypeDef RS05_MIT_WriteParameterRaw(RS05_MIT_ManagerTypedef *manager,
+                                              uint8_t motor_id,
+                                              uint16_t index,
+                                              const uint8_t value[4])
+{
+    uint8_t data[8] = {0U};
+
+    if (!RS05_MIT_Manager_IsValid(manager) || (value == NULL))
+    {
+        return HAL_ERROR;
+    }
+
+    RS05_Codec_WriteU16LE(&data[0], index);
     memcpy(&data[4], value, 4U);
-    return CAN_SendStdFrame(hcan,
+
+    return CAN_SendStdFrame(manager->hcan,
                             RS05_MIT_BuildStdId(
                                 RS05_MIT_FRAME_WRITE_PARAMETER, motor_id),
                             data, 8U);
+}
+
+
+
+HAL_StatusTypeDef RS05_MIT_WriteParameterU8(RS05_MIT_ManagerTypedef *manager,
+                                             uint8_t motor_id,
+                                             uint16_t index,
+                                             uint8_t value)
+{
+    const uint8_t raw[4] = {value, 0U, 0U, 0U};
+
+    return RS05_MIT_WriteParameterRaw(manager, motor_id, index, raw);
+}
+
+HAL_StatusTypeDef RS05_MIT_WriteParameterU16(RS05_MIT_ManagerTypedef *manager,
+                                              uint8_t motor_id,
+                                              uint16_t index,
+                                              uint16_t value)
+{
+    uint8_t raw[4] = {0U};
+
+    RS05_Codec_WriteU16LE(raw, value);
+    return RS05_MIT_WriteParameterRaw(manager, motor_id, index, raw);
+}
+
+HAL_StatusTypeDef RS05_MIT_WriteParameterU32(RS05_MIT_ManagerTypedef *manager,
+                                              uint8_t motor_id,
+                                              uint16_t index,
+                                              uint32_t value)
+{
+    uint8_t raw[4] = {0U};
+
+    RS05_Codec_WriteU32LE(raw, value);
+    return RS05_MIT_WriteParameterRaw(manager, motor_id, index, raw);
+}
+
+HAL_StatusTypeDef RS05_MIT_WriteParameterFloat(RS05_MIT_ManagerTypedef *manager,
+                                                uint8_t motor_id,
+                                                uint16_t index,
+                                                float value)
+{
+    uint8_t raw[4] = {0U};
+
+    RS05_Codec_WriteFloatLE(raw, value);
+    return RS05_MIT_WriteParameterRaw(manager, motor_id, index, raw);
 }
 
 uint8_t RS05_MIT_IsOnline(const RS05_MIT_MotorTypedef *motor,
