@@ -175,6 +175,10 @@ void RS05_ProcessFrame(RS05_ManagerTypedef *manager,
             RS05_ParseFeedback(motor, ext_id, data);
             break;
 
+        case RS05_COMM_TYPE_ACTIVE_REPORT:
+            RS05_ParseFeedback(motor, ext_id, data);
+            break;
+
         case RS05_COMM_TYPE_READ_PARAMETER:
             RS05_ParseParameterReply(motor,ext_id, data);
             break;

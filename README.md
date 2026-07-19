@@ -58,6 +58,23 @@ PWM 舵机测试工程。
 - 电流限幅、失联清零、积分过零复位和低速摩擦前馈
 - USART6 调试接口和中文代码注释
 
+### can-motors/RS05
+
+基于 RoboMaster C 板（STM32F407）和 CAN1 的 RS05 电机驱动工程。
+
+已包含的方向：
+
+- RS05 私有扩展帧协议与 MIT 标准帧协议
+- 两套独立电机管理器和统一 CAN FIFO0 接收分发
+- 运控、速度、电流、PP、CSP 五种控制模式
+- `Enter...Mode()` 一次性配置与 `Set...Target()` 循环目标更新
+- 机械零位、主动上报、故障位和在线状态
+- U8、U16、U32、float 参数读写
+- 每台电机最多 10 项最近参数缓存
+- CAN1 PD0/PD1、1 Mbps 配置和 MIT 小角度往复测试
+
+详细用法见 [`can-motors/RS05/README.md`](can-motors/RS05/README.md)。
+
 ## Notes
 
 - 原始工程仍保留在 `C:\Clion` 下，这个仓库是整理后的学习归档副本。
