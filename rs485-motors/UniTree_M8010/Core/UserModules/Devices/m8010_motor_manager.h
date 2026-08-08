@@ -14,7 +14,8 @@ typedef enum
 
 typedef struct
 {
-    M8010_State state;
+    volatile M8010_State state;
+    uint32_t rx_start_tick;
     uint8_t tx_buffer[M8010_FRAME_SIZE];
     uint8_t rx_buffer[M8010_RESPONSE_SIZE];
 
@@ -39,8 +40,10 @@ HAL_StatusTypeDef M8010_MotorManager_Register(M8010_MotorManager_t *manager,
 void M8010_MotorManager_Parse(M8010_MotorManager_t *manager,
                               uint8_t rx_buffer[M8010_RESPONSE_SIZE]);
 
-HAL_StatusTypeDef M8010_MotorManager_Update(M8010_MotorManager_t *manager);
+HAL_StatusTypeDef M8010_MotorManager_Update(M8010_MotorManager_t *manager,
+                                             uint32_t now);
 void M8010_MotorManager_TxCallBack(M8010_MotorManager_t *manager);
 void M8010_MotorManager_RxCallBack(M8010_MotorManager_t *manager);
+void M8010_MotorManager_ErrorCallBack(M8010_MotorManager_t *manager);
 
 #endif /* M8010_MOTOR_MANAGER_H */

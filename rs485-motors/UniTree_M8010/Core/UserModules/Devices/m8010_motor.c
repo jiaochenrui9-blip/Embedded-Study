@@ -61,3 +61,23 @@ uint8_t M8010_Motor_GetFeedback(M8010_Motor_t *motor,
 
     return 1U;
 }
+
+uint8_t M8010_Motor_Isonline(M8010_Motor_t *motor, uint32_t now)
+{
+    if (motor == NULL)
+    {
+        return 0U;
+    }
+
+    if ((motor->feedback_count == 0U) ||
+        ((now - motor->last_feedback_tick) > M8010_OFFLINE_TIMEOUT_MS))
+    {
+        motor->online = 0U;
+    }
+    else
+    {
+        motor->online = 1U;
+    }
+
+    return motor->online;
+}

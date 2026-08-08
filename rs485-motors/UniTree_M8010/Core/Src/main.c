@@ -105,6 +105,7 @@ int main(void)
   {
     Error_Handler();
   }
+  uint32_t now = HAL_GetTick();
 
   /* USER CODE END 2 */
 
@@ -112,13 +113,14 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    if (HAL_GetTick() - now > 1U)
+    {
+      now = HAL_GetTick();
+      (void)M8010_MotorManager_Update(&m8010_manager, HAL_GetTick());
+    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    if (m8010_manager.state == M8010_IDLE)
-    {
-      (void)M8010_MotorManager_Update(&m8010_manager);
-    }
   }
   /* USER CODE END 3 */
 }
@@ -257,6 +259,14 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
   if (huart == m8010_manager.huart)
   {
     M8010_MotorManager_RxCallBack(&m8010_manager);
+  }
+}
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+  if (huart == m8010_manager.huart)
+  {
+    M8010_MotorManager_ErrorCallBack(&m8010_manager);
   }
 }
 

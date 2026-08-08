@@ -1,4 +1,4 @@
-#include "M8010.h"
+#include "M8010_Bus.h"
 
 #define M8010_PI                    3.14159265358979323846f
 #define M8010_TORQUE_SCALE          256.0f

@@ -33,8 +33,8 @@ enable_language(C ASM)
 
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME}
-    Core/UserModules/BSP/M8010.c
-    Core/UserModules/BSP/M8010.h
+    Core/UserModules/BSP/M8010_Bus.c
+    Core/UserModules/BSP/M8010_Bus.h
     Core/UserModules/Devices/m8010_motor.c
     Core/UserModules/Devices/m8010_motor.h
     Core/UserModules/Devices/m8010_motor_manager.c
