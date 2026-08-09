@@ -36,11 +36,9 @@ add_executable(${CMAKE_PROJECT_NAME}
     Core/Src/PD42S1.c
     Core/Src/PD42S1_Read.c
     Core/Src/PD42S1_Control.c
-    Core/Src/PD42S1_Limit.c
     Core/Inc/PD42S1.h
     Core/Inc/PD42S1_Private.h
 )
-
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
 

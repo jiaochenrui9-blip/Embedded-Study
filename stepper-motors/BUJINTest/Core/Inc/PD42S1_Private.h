@@ -22,14 +22,7 @@
 #define PD42S1_CMD_READ_ENABLE_STATE 0x2FU
 #define PD42S1_CMD_READ_ARRIVED_FLAG 0x30U
 #define PD42S1_CMD_SET_MODE 0x62U
-#define PD42S1_CMD_SET_LEFT_LIMIT_POSITION 0x90U
-#define PD42S1_CMD_SET_HOME_MODE 0x91U
-#define PD42S1_CMD_TRIGGER_HOME 0x92U
-#define PD42S1_CMD_ABORT_HOME 0x93U
-#define PD42S1_CMD_READ_HOME_PARAM 0x94U
-#define PD42S1_CMD_SET_AUTO_HOME 0x97U
-#define PD42S1_CMD_SET_RIGHT_LIMIT_POSITION 0x98U
-#define PD42S1_CMD_SET_LIMIT_SWITCH 0x99U
+#define PD42S1_CMD_SET_POSITION_MAX_TORQUE 0x64U
 #define PD42S1_CMD_OPEN_SPEED 0xE0U
 #define PD42S1_CMD_OPEN_ABS_POSITION 0xE1U
 #define PD42S1_CMD_OPEN_REL_POSITION 0xE2U
@@ -49,21 +42,21 @@
 #define PD42S1_CMD_CLEAR_STATE 0xFBU
 #define PD42S1_CMD_STOP 0xFCU
 
-HAL_StatusTypeDef PD42S1_SendCommand(PD42S1_HandleTypeDef *motor,
-                                      uint8_t code,
+HAL_StatusTypeDef PD42S1_SendCommand(PD42S1_ManagerTypeDef *manager,
+                                       uint8_t device_id,
+                                       uint8_t code,
                                       const uint8_t *data,
                                       uint8_t data_len,
                                       uint8_t *rx,
                                       uint16_t *rx_len,
                                       uint16_t rx_max,
                                       uint32_t timeout_ms);
-HAL_StatusTypeDef PD42S1_ReadData(PD42S1_HandleTypeDef *motor,
+HAL_StatusTypeDef PD42S1_ReadData(PD42S1_ManagerTypeDef *manager,
+                                   uint8_t device_id,
                                    uint8_t code,
                                    uint8_t *rx,
                                    uint16_t rx_size,
                                    uint8_t data_len);
-HAL_StatusTypeDef PD42S1_ValidateDirectionAndAccel(uint8_t direction, uint8_t acceleration);
-HAL_StatusTypeDef PD42S1_ValidatePulseWidth(uint16_t max_width_us, uint16_t min_width_us);
 
 void PD42S1_WriteU16BE(uint8_t *dst, uint16_t value);
 void PD42S1_WriteU32BE(uint8_t *dst, uint32_t value);

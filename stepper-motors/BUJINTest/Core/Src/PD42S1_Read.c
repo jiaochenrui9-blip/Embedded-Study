@@ -1,198 +1,208 @@
 #include "PD42S1_Private.h"
 
-HAL_StatusTypeDef PD42S1_ReadVersion(PD42S1_HandleTypeDef *motor,
+HAL_StatusTypeDef PD42S1_ReadVersion(PD42S1_ManagerTypeDef *manager,
+                                      uint8_t device_id,
                                       uint8_t *rx,
                                       uint16_t *rx_len,
                                       uint32_t timeout_ms)
 {
-  return PD42S1_SendCommand(motor, PD42S1_CMD_READ_VERSION, NULL, 0, rx, rx_len, 32, timeout_ms);
+  return PD42S1_SendCommand(manager, device_id, PD42S1_CMD_READ_VERSION, NULL, 0U, rx, rx_len, 32U, timeout_ms);
 }
 
-HAL_StatusTypeDef PD42S1_ReadPhaseCurrent(PD42S1_HandleTypeDef *motor, int16_t *current_ma)
+HAL_StatusTypeDef PD42S1_ReadPhaseCurrent(PD42S1_ManagerTypeDef *manager, uint8_t device_id)
 {
+  PD42S1_MotorTypeDef *motor = PD42S1_FindMotor(manager, device_id);
   uint8_t rx[8];
   HAL_StatusTypeDef status;
 
-  if (current_ma == NULL)
+  if (motor == NULL)
   {
     return HAL_ERROR;
   }
 
-  status = PD42S1_ReadData(motor, PD42S1_CMD_READ_PHASE_CURRENT, rx, sizeof(rx), 2);
+  status = PD42S1_ReadData(manager, device_id, PD42S1_CMD_READ_PHASE_CURRENT, rx, sizeof(rx), 2U);
   if (status == HAL_OK)
   {
-    *current_ma = PD42S1_ReadI16BE(&rx[PD42S1_REPLY_DATA_OFFSET]);
+    motor->current_ma = PD42S1_ReadI16BE(&rx[PD42S1_REPLY_DATA_OFFSET]);
   }
 
   return status;
 }
-
-HAL_StatusTypeDef PD42S1_ReadBusVoltage(PD42S1_HandleTypeDef *motor, float *voltage)
+HAL_StatusTypeDef PD42S1_ReadBusVoltage(PD42S1_ManagerTypeDef *manager, uint8_t device_id)
 {
+  PD42S1_MotorTypeDef *motor = PD42S1_FindMotor(manager, device_id);
   uint8_t rx[10];
   HAL_StatusTypeDef status;
 
-  if (voltage == NULL)
+  if (motor == NULL)
   {
     return HAL_ERROR;
   }
 
-  status = PD42S1_ReadData(motor, PD42S1_CMD_READ_BUS_VOLTAGE, rx, sizeof(rx), 4);
+  status = PD42S1_ReadData(manager, device_id, PD42S1_CMD_READ_BUS_VOLTAGE, rx, sizeof(rx), 4U);
   if (status == HAL_OK)
   {
-    *voltage = PD42S1_ReadFloatBE(&rx[PD42S1_REPLY_DATA_OFFSET]);
+    motor->bus_voltage = PD42S1_ReadFloatBE(&rx[PD42S1_REPLY_DATA_OFFSET]);
   }
 
   return status;
 }
 
-HAL_StatusTypeDef PD42S1_ReadInputPulse(PD42S1_HandleTypeDef *motor, uint32_t *pulse_count)
+HAL_StatusTypeDef PD42S1_ReadInputPulse(PD42S1_ManagerTypeDef *manager, uint8_t device_id)
 {
+  PD42S1_MotorTypeDef *motor = PD42S1_FindMotor(manager, device_id);
   uint8_t rx[10];
   HAL_StatusTypeDef status;
 
-  if (pulse_count == NULL)
+  if (motor == NULL)
   {
     return HAL_ERROR;
   }
 
-  status = PD42S1_ReadData(motor, PD42S1_CMD_READ_INPUT_PULSE, rx, sizeof(rx), 4);
+  status = PD42S1_ReadData(manager, device_id, PD42S1_CMD_READ_INPUT_PULSE, rx, sizeof(rx), 4U);
   if (status == HAL_OK)
   {
-    *pulse_count = PD42S1_ReadU32BE(&rx[PD42S1_REPLY_DATA_OFFSET]);
+    motor->input_pulse = PD42S1_ReadU32BE(&rx[PD42S1_REPLY_DATA_OFFSET]);
   }
 
   return status;
 }
 
-HAL_StatusTypeDef PD42S1_ReadRealtimeSpeed(PD42S1_HandleTypeDef *motor, int16_t *rpm)
+HAL_StatusTypeDef PD42S1_ReadRealtimeSpeed(PD42S1_ManagerTypeDef *manager, uint8_t device_id)
 {
+  PD42S1_MotorTypeDef *motor = PD42S1_FindMotor(manager, device_id);
   uint8_t rx[8];
   HAL_StatusTypeDef status;
 
-  if (rpm == NULL)
+  if (motor == NULL)
   {
     return HAL_ERROR;
   }
 
-  status = PD42S1_ReadData(motor, PD42S1_CMD_READ_REALTIME_SPEED, rx, sizeof(rx), 2);
+  status = PD42S1_ReadData(manager, device_id, PD42S1_CMD_READ_REALTIME_SPEED, rx, sizeof(rx), 2U);
   if (status == HAL_OK)
   {
-    *rpm = PD42S1_ReadI16BE(&rx[PD42S1_REPLY_DATA_OFFSET]);
+    motor->realtime_speed_rpm = PD42S1_ReadI16BE(&rx[PD42S1_REPLY_DATA_OFFSET]);
   }
 
   return status;
 }
 
-HAL_StatusTypeDef PD42S1_ReadRealtimePosition(PD42S1_HandleTypeDef *motor, int32_t *position)
+HAL_StatusTypeDef PD42S1_ReadRealtimePosition(PD42S1_ManagerTypeDef *manager, uint8_t device_id)
 {
+  PD42S1_MotorTypeDef *motor = PD42S1_FindMotor(manager, device_id);
   uint8_t rx[10];
   HAL_StatusTypeDef status;
 
-  if (position == NULL)
+  if (motor == NULL)
   {
     return HAL_ERROR;
   }
 
-  status = PD42S1_ReadData(motor, PD42S1_CMD_READ_REALTIME_POSITION, rx, sizeof(rx), 4);
+  status = PD42S1_ReadData(manager, device_id, PD42S1_CMD_READ_REALTIME_POSITION, rx, sizeof(rx), 4U);
   if (status == HAL_OK)
   {
-    *position = PD42S1_ReadI32BE(&rx[PD42S1_REPLY_DATA_OFFSET]);
+    motor->position = PD42S1_ReadI32BE(&rx[PD42S1_REPLY_DATA_OFFSET]);
   }
 
   return status;
 }
 
-HAL_StatusTypeDef PD42S1_ReadPositionError(PD42S1_HandleTypeDef *motor, int32_t *error)
+HAL_StatusTypeDef PD42S1_ReadPositionError(PD42S1_ManagerTypeDef *manager, uint8_t device_id)
 {
+  PD42S1_MotorTypeDef *motor = PD42S1_FindMotor(manager, device_id);
   uint8_t rx[10];
   HAL_StatusTypeDef status;
 
-  if (error == NULL)
+  if (motor == NULL)
   {
     return HAL_ERROR;
   }
 
-  status = PD42S1_ReadData(motor, PD42S1_CMD_READ_POSITION_ERROR, rx, sizeof(rx), 4);
+  status = PD42S1_ReadData(manager, device_id, PD42S1_CMD_READ_POSITION_ERROR, rx, sizeof(rx), 4U);
   if (status == HAL_OK)
   {
-    *error = PD42S1_ReadI32BE(&rx[PD42S1_REPLY_DATA_OFFSET]);
+    motor->position_error = PD42S1_ReadI32BE(&rx[PD42S1_REPLY_DATA_OFFSET]);
   }
 
   return status;
 }
 
-HAL_StatusTypeDef PD42S1_ReadRunStatus(PD42S1_HandleTypeDef *motor, uint8_t *run_status)
+HAL_StatusTypeDef PD42S1_ReadRunStatus(PD42S1_ManagerTypeDef *manager, uint8_t device_id)
 {
+  PD42S1_MotorTypeDef *motor = PD42S1_FindMotor(manager, device_id);
   uint8_t rx[7];
   HAL_StatusTypeDef status;
 
-  if (run_status == NULL)
+  if (motor == NULL)
   {
     return HAL_ERROR;
   }
 
-  status = PD42S1_ReadData(motor, PD42S1_CMD_READ_RUN_STATUS, rx, sizeof(rx), 1);
+  status = PD42S1_ReadData(manager, device_id, PD42S1_CMD_READ_RUN_STATUS, rx, sizeof(rx), 1U);
   if (status == HAL_OK)
   {
-    *run_status = rx[PD42S1_REPLY_DATA_OFFSET];
+    motor->run_status = rx[PD42S1_REPLY_DATA_OFFSET];
   }
 
   return status;
 }
 
-HAL_StatusTypeDef PD42S1_ReadStallFlag(PD42S1_HandleTypeDef *motor, uint8_t *stall_flag)
+HAL_StatusTypeDef PD42S1_ReadStallFlag(PD42S1_ManagerTypeDef *manager, uint8_t device_id)
 {
+  PD42S1_MotorTypeDef *motor = PD42S1_FindMotor(manager, device_id);
   uint8_t rx[7];
   HAL_StatusTypeDef status;
 
-  if (stall_flag == NULL)
+  if (motor == NULL)
   {
     return HAL_ERROR;
   }
 
-  status = PD42S1_ReadData(motor, PD42S1_CMD_READ_STALL_FLAG, rx, sizeof(rx), 1);
+  status = PD42S1_ReadData(manager, device_id, PD42S1_CMD_READ_STALL_FLAG, rx, sizeof(rx), 1U);
   if (status == HAL_OK)
   {
-    *stall_flag = rx[PD42S1_REPLY_DATA_OFFSET];
+    motor->stall_flag = rx[PD42S1_REPLY_DATA_OFFSET];
   }
 
   return status;
 }
 
-HAL_StatusTypeDef PD42S1_ReadEnableState(PD42S1_HandleTypeDef *motor, uint8_t *enable_state)
+HAL_StatusTypeDef PD42S1_ReadEnableState(PD42S1_ManagerTypeDef *manager, uint8_t device_id)
 {
+  PD42S1_MotorTypeDef *motor = PD42S1_FindMotor(manager, device_id);
   uint8_t rx[7];
   HAL_StatusTypeDef status;
 
-  if (enable_state == NULL)
+  if (motor == NULL)
   {
     return HAL_ERROR;
   }
 
-  status = PD42S1_ReadData(motor, PD42S1_CMD_READ_ENABLE_STATE, rx, sizeof(rx), 1);
+  status = PD42S1_ReadData(manager, device_id, PD42S1_CMD_READ_ENABLE_STATE, rx, sizeof(rx), 1U);
   if (status == HAL_OK)
   {
-    *enable_state = rx[PD42S1_REPLY_DATA_OFFSET];
+    motor->enable_state = rx[PD42S1_REPLY_DATA_OFFSET];
   }
 
   return status;
 }
 
-HAL_StatusTypeDef PD42S1_ReadArrivedFlag(PD42S1_HandleTypeDef *motor, uint8_t *arrived_flag)
+HAL_StatusTypeDef PD42S1_ReadArrivedFlag(PD42S1_ManagerTypeDef *manager, uint8_t device_id)
 {
+  PD42S1_MotorTypeDef *motor = PD42S1_FindMotor(manager, device_id);
   uint8_t rx[7];
   HAL_StatusTypeDef status;
 
-  if (arrived_flag == NULL)
+  if (motor == NULL)
   {
     return HAL_ERROR;
   }
 
-  status = PD42S1_ReadData(motor, PD42S1_CMD_READ_ARRIVED_FLAG, rx, sizeof(rx), 1);
+  status = PD42S1_ReadData(manager, device_id, PD42S1_CMD_READ_ARRIVED_FLAG, rx, sizeof(rx), 1U);
   if (status == HAL_OK)
   {
-    *arrived_flag = rx[PD42S1_REPLY_DATA_OFFSET];
+    motor->arrived_flag = rx[PD42S1_REPLY_DATA_OFFSET];
   }
 
   return status;

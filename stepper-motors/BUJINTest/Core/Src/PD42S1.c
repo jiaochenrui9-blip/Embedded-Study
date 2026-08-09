@@ -1,43 +1,77 @@
 #include "PD42S1_Private.h"
 
-static HAL_StatusTypeDef PD42S1_ValidateReply(const PD42S1_HandleTypeDef *motor,
+static HAL_StatusTypeDef PD42S1_ValidateReply(const PD42S1_MotorTypeDef *motor,
                                               uint8_t code,
                                               const uint8_t *reply,
                                               uint16_t reply_len);
-static void PD42S1_ClearRx(PD42S1_HandleTypeDef *motor);
+static void PD42S1_ClearRx(PD42S1_ManagerTypeDef *manager);
 
-void PD42S1_SetAddress(PD42S1_HandleTypeDef *motor, uint8_t addr)
+void PD42S1_ManagerInit(PD42S1_ManagerTypeDef *manager,
+                         UART_HandleTypeDef *huart,
+                         GPIO_TypeDef *dir_port,
+                         uint16_t dir_pin)
 {
-  if (motor != NULL)
-  {
-    motor->addr = addr;
-  }
-}
-
-void PD42S1_Init(PD42S1_HandleTypeDef *motor,
-                 UART_HandleTypeDef *huart,
-                 GPIO_TypeDef *dir_port,
-                 uint16_t dir_pin)
-{
-  if (motor == NULL)
+  if (manager == NULL)
   {
     return;
   }
 
-  motor->huart = huart;
-  motor->dir_port = dir_port;
-  motor->dir_pin = dir_pin;
-  motor->tx_state = GPIO_PIN_SET;
-  motor->rx_state = GPIO_PIN_RESET;
-  motor->addr = 0x01U;
+  manager->huart = huart;
+  manager->dir_port = dir_port;
+  manager->dir_pin = dir_pin;
+  manager->tx_state = GPIO_PIN_SET;
+  manager->rx_state = GPIO_PIN_RESET;
+  manager->motor_count = 0U;
 
-  if (motor->dir_port != NULL)
+  for (uint8_t i = 0U; i < PD42S1_MAX_MOTORS; i++)
   {
-    HAL_GPIO_WritePin(motor->dir_port, motor->dir_pin, motor->rx_state);
+    manager->motors[i] = (PD42S1_MotorTypeDef){0};
+  }
+
+  if (manager->dir_port != NULL)
+  {
+    HAL_GPIO_WritePin(manager->dir_port, manager->dir_pin, manager->rx_state);
   }
 }
 
-HAL_StatusTypeDef PD42S1_SendCommand(PD42S1_HandleTypeDef *motor,
+HAL_StatusTypeDef PD42S1_RegisterMotor(PD42S1_ManagerTypeDef *manager, uint8_t device_id)
+{
+  PD42S1_MotorTypeDef *motor;
+
+  if (manager == NULL || manager->motor_count >= PD42S1_MAX_MOTORS ||
+      PD42S1_FindMotor(manager, device_id) != NULL)
+  {
+    return HAL_ERROR;
+  }
+
+  motor = &manager->motors[manager->motor_count];
+  *motor = (PD42S1_MotorTypeDef){0};
+  motor->device_id = device_id;
+  manager->motor_count++;
+
+  return HAL_OK;
+}
+
+PD42S1_MotorTypeDef *PD42S1_FindMotor(PD42S1_ManagerTypeDef *manager, uint8_t device_id)
+{
+  if (manager == NULL)
+  {
+    return NULL;
+  }
+
+  for (uint8_t i = 0U; i < manager->motor_count; i++)
+  {
+    if (manager->motors[i].device_id == device_id)
+    {
+      return &manager->motors[i];
+    }
+  }
+
+  return NULL;
+}
+
+HAL_StatusTypeDef PD42S1_SendCommand(PD42S1_ManagerTypeDef *manager,
+                                      uint8_t device_id,
                                       uint8_t code,
                                       const uint8_t *data,
                                       uint8_t data_len,
@@ -46,34 +80,35 @@ HAL_StatusTypeDef PD42S1_SendCommand(PD42S1_HandleTypeDef *motor,
                                       uint16_t rx_max,
                                       uint32_t timeout_ms)
 {
+  PD42S1_MotorTypeDef *motor;
   uint8_t frame[PD42S1_FRAME_MAX_LEN];
   uint8_t ack[PD42S1_FRAME_MAX_LEN];
   uint8_t *target_rx;
   uint16_t target_max;
   uint16_t local_rx_len = 0;
   uint16_t *target_rx_len;
-  uint8_t sum = 0;
+  uint8_t sum = 0U;
   uint16_t frame_len;
   uint32_t start_tick;
   uint32_t receive_timeout;
   HAL_StatusTypeDef status;
 
-  if (motor == NULL || motor->huart == NULL || motor->dir_port == NULL ||
-      data_len > (PD42S1_FRAME_MAX_LEN - 5U) ||
-      (data == NULL && data_len > 0U))
+  motor = PD42S1_FindMotor(manager, device_id);
+  if (manager == NULL || manager->huart == NULL || manager->dir_port == NULL || motor == NULL ||
+      data_len > (PD42S1_FRAME_MAX_LEN - 5U) || (data == NULL && data_len > 0U))
   {
     return HAL_ERROR;
   }
 
   frame[0] = PD42S1_FRAME_HEAD;
-  frame[1] = motor->addr;
+  frame[1] = motor->device_id;
   frame[2] = code;
-  for (uint8_t i = 0; i < data_len; i++)
+  for (uint8_t i = 0U; i < data_len; i++)
   {
     frame[3U + i] = data[i];
   }
 
-  for (uint8_t i = 0; i < (uint8_t)(3U + data_len); i++)
+  for (uint8_t i = 0U; i < (uint8_t)(3U + data_len); i++)
   {
     sum = (uint8_t)(sum + frame[i]);
   }
@@ -81,21 +116,21 @@ HAL_StatusTypeDef PD42S1_SendCommand(PD42S1_HandleTypeDef *motor,
   frame[4U + data_len] = PD42S1_FRAME_TAIL;
   frame_len = (uint16_t)(5U + data_len);
 
-  PD42S1_ClearRx(motor);
+  PD42S1_ClearRx(manager);
 
-  HAL_GPIO_WritePin(motor->dir_port, motor->dir_pin, motor->tx_state);
-  HAL_Delay(1);
-  status = HAL_UART_Transmit(motor->huart, frame, frame_len, 200);
+  HAL_GPIO_WritePin(manager->dir_port, manager->dir_pin, manager->tx_state);
+  HAL_Delay(1U);
+  status = HAL_UART_Transmit(manager->huart, frame, frame_len, 200U);
   if (status != HAL_OK)
   {
-    HAL_GPIO_WritePin(motor->dir_port, motor->dir_pin, motor->rx_state);
+    HAL_GPIO_WritePin(manager->dir_port, manager->dir_pin, manager->rx_state);
     return status;
   }
 
-  while (__HAL_UART_GET_FLAG(motor->huart, UART_FLAG_TC) == RESET)
+  while (__HAL_UART_GET_FLAG(manager->huart, UART_FLAG_TC) == RESET)
   {
   }
-  HAL_GPIO_WritePin(motor->dir_port, motor->dir_pin, motor->rx_state);
+  HAL_GPIO_WritePin(manager->dir_port, manager->dir_pin, manager->rx_state);
 
   if (rx != NULL && rx_len != NULL && rx_max > 0U)
   {
@@ -111,17 +146,16 @@ HAL_StatusTypeDef PD42S1_SendCommand(PD42S1_HandleTypeDef *motor,
   }
 
   receive_timeout = timeout_ms > 0U ? timeout_ms : PD42S1_DEFAULT_TIMEOUT_MS;
-  *target_rx_len = 0;
+  *target_rx_len = 0U;
   start_tick = HAL_GetTick();
   while ((HAL_GetTick() - start_tick) < receive_timeout && *target_rx_len < target_max)
   {
-    if (HAL_UART_Receive(motor->huart, &target_rx[*target_rx_len], 1, 5) == HAL_OK)
+    if (HAL_UART_Receive(manager->huart, &target_rx[*target_rx_len], 1U, 5U) == HAL_OK)
     {
       (*target_rx_len)++;
       start_tick = HAL_GetTick();
 
-      if (*target_rx_len >= 6U &&
-          target_rx[*target_rx_len - 1U] == PD42S1_FRAME_TAIL &&
+      if (*target_rx_len >= 6U && target_rx[*target_rx_len - 1U] == PD42S1_FRAME_TAIL &&
           PD42S1_ValidateReply(motor, code, target_rx, *target_rx_len) == HAL_OK)
       {
         break;
@@ -137,13 +171,14 @@ HAL_StatusTypeDef PD42S1_SendCommand(PD42S1_HandleTypeDef *motor,
   return PD42S1_ValidateReply(motor, code, target_rx, *target_rx_len);
 }
 
-HAL_StatusTypeDef PD42S1_ReadData(PD42S1_HandleTypeDef *motor,
+HAL_StatusTypeDef PD42S1_ReadData(PD42S1_ManagerTypeDef *manager,
+                                   uint8_t device_id,
                                    uint8_t code,
                                    uint8_t *rx,
                                    uint16_t rx_size,
                                    uint8_t data_len)
 {
-  uint16_t rx_len = 0;
+  uint16_t rx_len = 0U;
   uint16_t expected_len = (uint16_t)(data_len + 6U);
   HAL_StatusTypeDef status;
 
@@ -152,7 +187,15 @@ HAL_StatusTypeDef PD42S1_ReadData(PD42S1_HandleTypeDef *motor,
     return HAL_ERROR;
   }
 
-  status = PD42S1_SendCommand(motor, code, NULL, 0, rx, &rx_len, rx_size, PD42S1_DEFAULT_TIMEOUT_MS);
+  status = PD42S1_SendCommand(manager,
+                              device_id,
+                              code,
+                              NULL,
+                              0U,
+                              rx,
+                              &rx_len,
+                              rx_size,
+                              PD42S1_DEFAULT_TIMEOUT_MS);
   if (status != HAL_OK)
   {
     return status;
@@ -161,54 +204,26 @@ HAL_StatusTypeDef PD42S1_ReadData(PD42S1_HandleTypeDef *motor,
   return rx_len >= expected_len ? HAL_OK : HAL_ERROR;
 }
 
-static HAL_StatusTypeDef PD42S1_ValidateReply(const PD42S1_HandleTypeDef *motor,
+static HAL_StatusTypeDef PD42S1_ValidateReply(const PD42S1_MotorTypeDef *motor,
                                               uint8_t code,
                                               const uint8_t *reply,
                                               uint16_t reply_len)
 {
-  uint8_t sum = 0;
+  uint8_t sum = 0U;
 
-  if (motor == NULL ||
-      reply == NULL ||
-      reply_len < 6U ||
-      reply[0] != PD42S1_FRAME_HEAD ||
-      reply[1] != motor->addr ||
-      reply[2] != code ||
+  if (motor == NULL || reply == NULL || reply_len < 6U || reply[0] != PD42S1_FRAME_HEAD ||
+      reply[1] != motor->device_id || reply[2] != code ||
       reply[reply_len - 1U] != PD42S1_FRAME_TAIL)
   {
     return HAL_ERROR;
   }
 
-  for (uint16_t i = 0; i < (uint16_t)(reply_len - 2U); i++)
+  for (uint16_t i = 0U; i < (uint16_t)(reply_len - 2U); i++)
   {
     sum = (uint8_t)(sum + reply[i]);
   }
 
   if (sum != reply[reply_len - 2U] || reply[3] != PD42S1_ACK_OK)
-  {
-    return HAL_ERROR;
-  }
-
-  return HAL_OK;
-}
-
-HAL_StatusTypeDef PD42S1_ValidateDirectionAndAccel(uint8_t direction, uint8_t acceleration)
-{
-  if (direction > PD42S1_DIR_REVERSE || acceleration > 200U)
-  {
-    return HAL_ERROR;
-  }
-
-  return HAL_OK;
-}
-
-HAL_StatusTypeDef PD42S1_ValidatePulseWidth(uint16_t max_width_us, uint16_t min_width_us)
-{
-  if (max_width_us < PD42S1_PULSE_WIDTH_MIN_US ||
-      max_width_us > PD42S1_PULSE_WIDTH_MAX_US ||
-      min_width_us < PD42S1_PULSE_WIDTH_MIN_US ||
-      min_width_us > PD42S1_PULSE_WIDTH_MAX_US ||
-      max_width_us <= min_width_us)
   {
     return HAL_ERROR;
   }
@@ -259,10 +274,8 @@ int16_t PD42S1_ReadI16BE(const uint8_t *src)
 
 uint32_t PD42S1_ReadU32BE(const uint8_t *src)
 {
-  return ((uint32_t)src[0] << 24) |
-         ((uint32_t)src[1] << 16) |
-         ((uint32_t)src[2] << 8) |
-         src[3];
+  return ((uint32_t)src[0] << 24) | ((uint32_t)src[1] << 16) |
+         ((uint32_t)src[2] << 8) | src[3];
 }
 
 int32_t PD42S1_ReadI32BE(const uint8_t *src)
@@ -282,19 +295,19 @@ float PD42S1_ReadFloatBE(const uint8_t *src)
   return converter.f;
 }
 
-static void PD42S1_ClearRx(PD42S1_HandleTypeDef *motor)
+static void PD42S1_ClearRx(PD42S1_ManagerTypeDef *manager)
 {
-  if (motor == NULL || motor->huart == NULL || motor->dir_port == NULL)
+  if (manager == NULL || manager->huart == NULL || manager->dir_port == NULL)
   {
     return;
   }
 
-  HAL_GPIO_WritePin(motor->dir_port, motor->dir_pin, motor->rx_state);
+  HAL_GPIO_WritePin(manager->dir_port, manager->dir_pin, manager->rx_state);
 
-  while (__HAL_UART_GET_FLAG(motor->huart, UART_FLAG_RXNE) == SET)
+  while (__HAL_UART_GET_FLAG(manager->huart, UART_FLAG_RXNE) == SET)
   {
-    (void)motor->huart->Instance->DR;
+    (void)manager->huart->Instance->DR;
   }
 
-  __HAL_UART_CLEAR_OREFLAG(motor->huart);
+  __HAL_UART_CLEAR_OREFLAG(manager->huart);
 }
