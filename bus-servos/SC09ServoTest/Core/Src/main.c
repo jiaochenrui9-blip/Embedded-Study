@@ -27,17 +27,13 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-typedef struct
-{
-  GPIO_PinState raw_state;
-  GPIO_PinState stable_state;
-  uint32_t change_tick;
-} Button_State_t;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define SC09_PRESENT_POSITION_ADDR 0x38U
+#define SERVO_MOVE_TIME 500U
+#define SERVO_READ_INTERVAL 100U
+#define SERVO_READ_TIMEOUT 30U
 
 /* USER CODE END PD */
 
@@ -52,20 +48,9 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 
-uint8_t test_servo_id=5;
- uint16_t target_position=0;
-uint16_t last_position=0xFFFF;
-uint16_t actual_position;
-uint8_t ping_ok;
-uint8_t position_ok;
-uint32_t debug_tick;
-uint8_t found_servo_id=0xFF;
-uint8_t found_servo_count;
-uint8_t KeyNum;
-char buf[160];
-uint16_t Max;
-uint16_t Min;
-uint8_t ids[10]={1,2,3,4,5,6,7,8,9,10};
+uint32_t position_read_tick = 0U;
+char uart_buf[64];
+static Servo_ManagerTypeDef ServoManager;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -112,53 +97,52 @@ int main(void)
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
- // Servo_SetID_Broadcast(test_servo_id);
- // Servo_SetAngleLimit(test_servo_id, 0, 150);
+ // Servo_SetID_Broadcast(&ServoManager, 2U);
+ // Servo_SetAngleLimit(&ServoManager, 2U, min_position, max_position);
+  Servo_ManagerInit(&ServoManager, &huart1);
+  (void)Servo_RegisterMotor(&ServoManager, 2U);
+  HAL_Delay(100);
+  Servo_EnableTorque(&ServoManager, 2U, 1U);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    uint8_t limit_ok;
-    uint8_t raw_ok;
-    uint8_t position_raw[2] = {0};
-    uint16_t position_high_first;
-    uint16_t position_low_first;
-    int length;
-
-    position_ok = Servo_GetPosition(test_servo_id, &actual_position, 10);
-    limit_ok = Servo_GetAngleLimit(test_servo_id, &Min, &Max, 10);
-    raw_ok = Servo_ReadValue(test_servo_id, SC09_PRESENT_POSITION_ADDR, position_raw, 2, 10);
-    position_high_first = ((uint16_t)position_raw[0] << 8) | position_raw[1];
-    position_low_first = ((uint16_t)position_raw[1] << 8) | position_raw[0];
-
-    length = snprintf(buf, sizeof(buf),
-                      "id:%u,target:%u,actual:%u,pos_ok:%u,min:%u,max:%u,limit_ok:%u,raw:%02X %02X,hf:%u,lf:%u,raw_ok:%u\r\n",
-                      (unsigned int)test_servo_id,
-                      (unsigned int)target_position,
-                      (unsigned int)actual_position,
-                      (unsigned int)position_ok,
-                      (unsigned int)Min,
-                      (unsigned int)Max,
-                      (unsigned int)limit_ok,
-                      (unsigned int)position_raw[0],
-                      (unsigned int)position_raw[1],
-                      (unsigned int)position_high_first,
-                      (unsigned int)position_low_first,
-                      (unsigned int)raw_ok);
-    if (length > 0)
+    if ((HAL_GetTick() - position_read_tick) >= SERVO_READ_INTERVAL)
     {
-      HAL_UART_Transmit(&huart2, (uint8_t *)buf, (uint16_t)length, 50);
-    }
-    HAL_Delay(200);
-    HAL_Delay(2000);
-    target_position = 0;
-    Servo_SyncMove(ids,10,0,500,0);
-    HAL_Delay(2000);
-    target_position = 1023;
-    Servo_SyncMove(ids,10,1023,500,0);
+      int length;
+      uint8_t position_ok;
+      Servo_MotorTypeDef *servo;
+      Servo_Move(&ServoManager, 2U, 600U, 2000U, 0U);
+      position_read_tick = HAL_GetTick();
+      position_ok = Servo_GetPosition(&ServoManager, 2U, SERVO_READ_TIMEOUT);
+      (void)Servo_GetAngleLimit(&ServoManager, 2U, 100U);
+      servo = Servo_FindMotor(&ServoManager, 2U);
 
+      if (position_ok && servo != NULL)
+      {
+        length = snprintf(uart_buf, sizeof(uart_buf),
+                          "id:%u,pos:%u,min%u,max:%u,pos_ok:1\r\n",
+                          servo->device_id,
+                          (unsigned int)servo->feedback.position,
+                          (unsigned int)servo->min_position,
+                          (unsigned int)servo->max_position);
+      }
+     else
+     {
+       length = snprintf(uart_buf, sizeof(uart_buf),
+                          "pos:%u,pos_ok:-1\r\n",
+                          servo != NULL ? (unsigned int)servo->feedback.position : 0U);
+     }
+
+      if (length > 0)
+      {
+        HAL_UART_Transmit(&huart2, (uint8_t *)uart_buf, (uint16_t)length, 50);
+      }
+    }
+
+    HAL_Delay(10);
   }
   /* USER CODE END 3 */
 }
