@@ -44,6 +44,17 @@ PWM 舵机测试工程。
 
 主要用于步进电机基础控制、方向控制、速度/步数测试等。
 
+### remote-control/ELRS
+
+基于 STM32F407 的 ELRS/CRSF 遥控接收与底盘命令解算工程。
+
+- USART1 循环 DMA + UART IDLE 接收
+- CRSF 帧解析、CRC 校验和 16 路遥控通道保存
+- 遥控通道映射为麦轮底盘常用的 `vx`、`vy`、`wz`、档位和使能状态
+- 当前只输出底盘命令，不包含电机驱动或四轮电机速度输出
+
+详细模块划分和验证边界见 [`remote-control/ELRS/README.md`](remote-control/ELRS/README.md)。
+
 ### can-motors/M3508
 
 基于 RoboMaster C 板（STM32F407）和 C620 电调的 M3508 CAN 控制工程。
