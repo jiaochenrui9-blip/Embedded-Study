@@ -69,8 +69,15 @@ HAL_StatusTypeDef ELRS_DMA_Start(UART_HandleTypeDef *huart)
 
 void ELRS_DMA_UpdateSize(UART_HandleTypeDef *huart, uint16_t size)
 {
-    if (huart != elrs_uart || size == 0u || size > ELRS_DMA_BUFFER_LEN ||
-        HAL_UARTEx_GetRxEventType(huart) != HAL_UART_RXEVENT_IDLE)
+    HAL_UART_RxEventTypeTypeDef event_type;
+
+    if (huart != elrs_uart || size == 0u || size > ELRS_DMA_BUFFER_LEN)
+    {
+        return;
+    }
+
+    event_type = HAL_UARTEx_GetRxEventType(huart);
+    if (event_type != HAL_UART_RXEVENT_IDLE && event_type != HAL_UART_RXEVENT_TC)
     {
         return;
     }
@@ -92,6 +99,7 @@ void ELRS_DMA_Process(void)
     if (elrs_restart_pending != 0u)
     {
         (void)HAL_UART_AbortReceive(elrs_uart);
+        ELRS_CRSF_Init();
         elrs_last_position = 0u;
         elrs_pending_position = 0u;
         elrs_data_pending = 0u;
