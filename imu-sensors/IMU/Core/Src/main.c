@@ -475,6 +475,15 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
   HAL_GPIO_Init(IST8310_RSTN_GPIO_Port, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : IST8310_DRDY_Pin */
+  GPIO_InitStruct.Pin = IST8310_DRDY_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(IST8310_DRDY_GPIO_Port, &GPIO_InitStruct);
+
+  HAL_NVIC_SetPriority(EXTI3_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(EXTI3_IRQn);
+
   /*Configure GPIO pins : Red_OLED_Pin Green_OLED_Pin Blue_OLED_Pin */
   GPIO_InitStruct.Pin = Red_OLED_Pin|Green_OLED_Pin|Blue_OLED_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -510,7 +519,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     static uint8_t ist8310_tick = 0u;
 
     (void)BMI088_StartSample();
-    IST8310_PollDRDY();
 
     ist8310_tick++;
     if (ist8310_tick >= 10u)
@@ -544,6 +552,14 @@ void HAL_I2C_MemTxCpltCallback(I2C_HandleTypeDef *hi2c)
 void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *hi2c)
 {
   IST8310_I2C_ErrorCallback(hi2c);
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if (GPIO_Pin == IST8310_DRDY_Pin)
+  {
+    IST8310_DRDY_IRQHandler();
+  }
 }
 
 /* USER CODE END 4 */

@@ -6,16 +6,14 @@
 #define IST8310_I2C_ADDRESS       (0x0Eu << 1u)
 #define IST8310_WHO_AM_I_REG      0x00u
 #define IST8310_WHO_AM_I_VALUE    0x10u
-#define IST8310_STAT1_REG         0x02u
 #define IST8310_DATA_REG          0x03u
 #define IST8310_CNTL1_REG         0x0Au
 #define IST8310_CNTL2_REG         0x0Bu
 #define IST8310_AVGCNTL_REG       0x41u
 #define IST8310_PDCNTL_REG        0x42u
 
-#define IST8310_DRDY_BIT          0x01u
 #define IST8310_SINGLE_MEASURE    0x01u
-#define IST8310_DRDY_ENABLE       0x08u
+#define IST8310_DRDY_CONFIG       0x0Cu
 #define IST8310_AVERAGE_16        0x24u
 #define IST8310_PULSE_NORMAL      0xC0u
 #define IST8310_UT_PER_LSB        0.3f
@@ -24,9 +22,7 @@
 static I2C_HandleTypeDef *IST8310_I2C;
 static IST8310_Data_t IST8310_DATA;
 static uint8_t IST8310_DMA_BUFFER[6];
-static uint8_t IST8310_DRDY_BUFFER;
 static uint8_t IST8310_TRIGGER_VALUE = IST8310_SINGLE_MEASURE;
-static volatile uint8_t IST8310_DMA_STATUS;
 static volatile uint8_t IST8310_SAMPLE_READY;
 static volatile uint8_t IST8310_SAMPLE_BUFFER[6];
 
@@ -35,7 +31,6 @@ typedef enum
     IST8310_STATE_IDLE = 0,
     IST8310_STATE_TRIGGERING,
     IST8310_STATE_WAITING_DRDY,
-    IST8310_STATE_READING_DRDY,
     IST8310_STATE_READING_DATA,
     IST8310_STATE_ERROR
 } IST8310_State_t;
@@ -53,23 +48,6 @@ static HAL_StatusTypeDef IST8310_StartTriggerDMA(void)
     if (status != HAL_OK)
     {
         IST8310_STATE = IST8310_STATE_ERROR;
-        IST8310_DMA_STATUS = IST8310_ERR_I2C;
-    }
-    return status;
-}
-
-static HAL_StatusTypeDef IST8310_StartDRDYReadDMA(void)
-{
-    HAL_StatusTypeDef status;
-
-    IST8310_STATE = IST8310_STATE_READING_DRDY;
-    status = HAL_I2C_Mem_Read_DMA(IST8310_I2C, IST8310_I2C_ADDRESS,
-                                  IST8310_STAT1_REG, I2C_MEMADD_SIZE_8BIT,
-                                  &IST8310_DRDY_BUFFER, 1u);
-    if (status != HAL_OK)
-    {
-        IST8310_STATE = IST8310_STATE_ERROR;
-        IST8310_DMA_STATUS = IST8310_ERR_I2C;
     }
     return status;
 }
@@ -85,7 +63,6 @@ static HAL_StatusTypeDef IST8310_StartDataReadDMA(void)
     if (status != HAL_OK)
     {
         IST8310_STATE = IST8310_STATE_ERROR;
-        IST8310_DMA_STATUS = IST8310_ERR_I2C;
     }
     return status;
 }
@@ -185,7 +162,6 @@ uint8_t IST8310_Init(I2C_HandleTypeDef *hi2c)
 
     IST8310_I2C = hi2c;
     memset(&IST8310_DATA, 0, sizeof(IST8310_DATA));
-    IST8310_DMA_STATUS = IST8310_OK;
     IST8310_SAMPLE_READY = 0u;
     IST8310_STATE = IST8310_STATE_IDLE;
 
@@ -204,7 +180,7 @@ uint8_t IST8310_Init(I2C_HandleTypeDef *hi2c)
         return IST8310_ERR_ID;
     }
 
-    status = IST8310_WriteAndVerify(IST8310_CNTL2_REG, IST8310_DRDY_ENABLE);
+    status = IST8310_WriteAndVerify(IST8310_CNTL2_REG, IST8310_DRDY_CONFIG);
     if (status != IST8310_OK)
     {
         return status;
@@ -224,60 +200,10 @@ uint8_t IST8310_Init(I2C_HandleTypeDef *hi2c)
     return IST8310_OK;
 }
 
-uint8_t IST8310_TriggerMeasurement(void)
-{
-    return IST8310_WriteRegister(IST8310_CNTL1_REG, IST8310_SINGLE_MEASURE);
-}
-
-uint8_t IST8310_IsDataReady(void)
-{
-    uint8_t status_reg;
-    uint8_t status;
-
-    if (IST8310_DATA.initialized == 0u)
-    {
-        return IST8310_ERR_NOT_INIT;
-    }
-
-    status = IST8310_ReadRegisters(IST8310_STAT1_REG, &status_reg, 1u);
-    if (status != IST8310_OK)
-    {
-        return status;
-    }
-
-    return ((status_reg & IST8310_DRDY_BIT) != 0u) ? IST8310_OK : IST8310_NOT_READY;
-}
-
-HAL_StatusTypeDef IST8310_StartReadDMA(void)
-{
-    HAL_StatusTypeDef status;
-
-    if (IST8310_I2C == NULL || IST8310_DATA.initialized == 0u)
-    {
-        IST8310_DMA_STATUS = IST8310_ERR_NOT_INIT;
-        return HAL_ERROR;
-    }
-    if (IST8310_STATE == IST8310_STATE_ERROR)
-    {
-        IST8310_STATE = IST8310_STATE_IDLE;
-    }
-    if (IST8310_STATE != IST8310_STATE_IDLE || IST8310_SAMPLE_READY != 0u)
-    {
-        IST8310_DMA_STATUS = IST8310_ERR_BUSY;
-        return HAL_BUSY;
-    }
-
-    IST8310_DMA_STATUS = IST8310_OK;
-    IST8310_SAMPLE_READY = 0u;
-    status = IST8310_StartDataReadDMA();
-    return status;
-}
-
 HAL_StatusTypeDef IST8310_StartSample(void)
 {
     if (IST8310_I2C == NULL || IST8310_DATA.initialized == 0u)
     {
-        IST8310_DMA_STATUS = IST8310_ERR_NOT_INIT;
         return HAL_ERROR;
     }
 
@@ -288,35 +214,15 @@ HAL_StatusTypeDef IST8310_StartSample(void)
 
     if (IST8310_STATE != IST8310_STATE_IDLE || IST8310_SAMPLE_READY != 0u)
     {
-        IST8310_DMA_STATUS = IST8310_ERR_BUSY;
         return HAL_BUSY;
     }
 
-    IST8310_DMA_STATUS = IST8310_OK;
     return IST8310_StartTriggerDMA();
-}
-
-void IST8310_PollDRDY(void)
-{
-    if (IST8310_STATE == IST8310_STATE_WAITING_DRDY)
-    {
-        (void)IST8310_StartDRDYReadDMA();
-    }
-}
-
-uint8_t IST8310_GetDMAStatus(void)
-{
-    return IST8310_DMA_STATUS;
 }
 
 uint8_t IST8310_IsSampleReady(void)
 {
     return IST8310_SAMPLE_READY;
-}
-
-void IST8310_ClearSampleReady(void)
-{
-    IST8310_SAMPLE_READY = 0u;
 }
 
 void IST8310_ProcessSample(void)
@@ -348,25 +254,21 @@ void IST8310_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c)
         return;
     }
 
-    if (IST8310_STATE == IST8310_STATE_READING_DRDY)
-    {
-        if ((IST8310_DRDY_BUFFER & IST8310_DRDY_BIT) != 0u)
-        {
-            (void)IST8310_StartDataReadDMA();
-        }
-        else
-        {
-            IST8310_STATE = IST8310_STATE_WAITING_DRDY;
-        }
-    }
-    else if (IST8310_STATE == IST8310_STATE_READING_DATA)
+    if (IST8310_STATE == IST8310_STATE_READING_DATA)
     {
         memcpy((void *)IST8310_SAMPLE_BUFFER, IST8310_DMA_BUFFER,
                sizeof(IST8310_DMA_BUFFER));
         IST8310_STATE = IST8310_STATE_IDLE;
-        IST8310_DMA_STATUS = IST8310_OK;
         __DMB();
         IST8310_SAMPLE_READY = 1u;
+    }
+}
+
+void IST8310_DRDY_IRQHandler(void)
+{
+    if (IST8310_STATE == IST8310_STATE_WAITING_DRDY)
+    {
+        (void)IST8310_StartDataReadDMA();
     }
 }
 
@@ -383,7 +285,6 @@ void IST8310_I2C_ErrorCallback(I2C_HandleTypeDef *hi2c)
     if (hi2c == IST8310_I2C)
     {
         IST8310_STATE = IST8310_STATE_ERROR;
-        IST8310_DMA_STATUS = IST8310_ERR_I2C;
         IST8310_SAMPLE_READY = 0u;
     }
 }

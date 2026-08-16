@@ -15,9 +15,8 @@ typedef enum
     IST8310_ERR_ID = 2,
     IST8310_ERR_I2C = 3,
     IST8310_ERR_CONFIG = 4,
-    IST8310_NOT_READY = 5,
-    IST8310_ERR_NOT_INIT = 6,
-    IST8310_ERR_BUSY = 7
+    IST8310_ERR_NOT_INIT = 5,
+    IST8310_ERR_BUSY = 6
 } IST8310_Status_t;
 
 typedef struct
@@ -34,18 +33,13 @@ uint8_t IST8310_Init(I2C_HandleTypeDef *hi2c);
 uint8_t IST8310_ReadID(uint8_t *id);
 uint8_t IST8310_ReadRegisters(uint8_t reg, uint8_t *data, uint16_t length);
 uint8_t IST8310_WriteRegister(uint8_t reg, uint8_t data);
-uint8_t IST8310_TriggerMeasurement(void);
-uint8_t IST8310_IsDataReady(void);
-HAL_StatusTypeDef IST8310_StartReadDMA(void);
 HAL_StatusTypeDef IST8310_StartSample(void);
-void IST8310_PollDRDY(void);
-uint8_t IST8310_GetDMAStatus(void);
 uint8_t IST8310_IsSampleReady(void);
-void IST8310_ClearSampleReady(void);
 void IST8310_ProcessSample(void);
 void IST8310_GetData(IST8310_Data_t *data);
 void IST8310_SetOffset(float x_uT, float y_uT, float z_uT);
 
+void IST8310_DRDY_IRQHandler(void);
 void IST8310_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c);
 void IST8310_I2C_MemTxCpltCallback(I2C_HandleTypeDef *hi2c);
 void IST8310_I2C_ErrorCallback(I2C_HandleTypeDef *hi2c);

@@ -214,6 +214,11 @@ void I2C3_ER_IRQHandler(void)
   HAL_I2C_ER_IRQHandler(&hi2c3);
 }
 
+void EXTI3_IRQHandler(void)
+{
+  HAL_GPIO_EXTI_IRQHandler(IST8310_DRDY_Pin);
+}
+
 void DMA1_Stream2_IRQHandler(void)
 {
   HAL_DMA_IRQHandler(&hdma_i2c3_rx);

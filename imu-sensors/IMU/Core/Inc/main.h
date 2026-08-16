@@ -61,6 +61,8 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define IST8310_RSTN_Pin GPIO_PIN_6
 #define IST8310_RSTN_GPIO_Port GPIOG
+#define IST8310_DRDY_Pin GPIO_PIN_3
+#define IST8310_DRDY_GPIO_Port GPIOG
 #define Red_OLED_Pin GPIO_PIN_12
 #define Red_OLED_GPIO_Port GPIOH
 #define Green_OLED_Pin GPIO_PIN_11
