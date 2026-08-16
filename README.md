@@ -55,6 +55,15 @@ PWM 舵机测试工程。
 
 详细模块划分和验证边界见 [`remote-control/ELRS/README.md`](remote-control/ELRS/README.md)。
 
+### imu-sensors/IMU
+
+基于 STM32F407、BMI088 和 IST8310 的 IMU 原始数据采集工程。
+
+- BMI088：SPI DMA，每 1 ms 采集一次加速度和角速度
+- IST8310：I2C DMA，每 10 ms 单次触发、等待 DRDY 后读取 XYZ 磁场
+- TIM8 统一调度；主循环只处理已完成的 DMA 数据
+- 当前不包含 AHRS 或姿态解算
+
 ### can-motors/M3508
 
 基于 RoboMaster C 板（STM32F407）和 C620 电调的 M3508 CAN 控制工程。
