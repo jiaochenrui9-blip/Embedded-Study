@@ -57,11 +57,12 @@ PWM 舵机测试工程。
 
 ### imu-sensors/IMU
 
-基于 STM32F407、BMI088 和 IST8310 的 IMU 原始数据采集工程。
+基于 STM32F407、BMI088 和 IST8310 的 IMU 姿态解算工程。
 
 - BMI088：SPI DMA，每 1 ms 采集一次加速度和角速度
 - IST8310：I2C DMA，每 10 ms 单次触发、等待 DRDY 后读取 XYZ 磁场
 - TIM8 统一调度；主循环只处理已完成的 DMA 数据
+- 四元数预测、加速度计和磁力计叉乘误差反馈、PI 修正角速度，以及 Roll/Pitch/Yaw 输出
 - 当前不包含 AHRS 或姿态解算
 
 ### can-motors/M3508

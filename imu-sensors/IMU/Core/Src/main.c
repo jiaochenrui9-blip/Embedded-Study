@@ -23,6 +23,7 @@
 /* USER CODE BEGIN Includes */
 #include "BMI088.h"
 #include "IST8310.h"
+#include "Attitude.h"
 
 /* USER CODE END Includes */
 
@@ -58,6 +59,7 @@ UART_HandleTypeDef huart6;
 /* USER CODE BEGIN PV */
 static BMI088_Data_t BMI088_DATA;
 static IST8310_Data_t MAG_DATA;
+static Attitude_Data_t ATTITUDE_DATA;
 static uint8_t BMI088_STATUS;
 static uint8_t IST8310_STATUS;
 
@@ -135,6 +137,8 @@ int main(void)
     Error_Handler();
   }
 
+  Attitude_Init();
+
   if (HAL_TIM_Base_Start_IT(&htim8) != HAL_OK)
   {
     Error_Handler();
@@ -150,6 +154,8 @@ int main(void)
     {
       BMI088_ProcessSample();
       BMI088_GetData(&BMI088_DATA);
+      Attitude_Update(&BMI088_DATA, &MAG_DATA, 0.001f);
+      Attitude_GetData(&ATTITUDE_DATA);
     }
 
     if (IST8310_IsSampleReady() != 0u)
