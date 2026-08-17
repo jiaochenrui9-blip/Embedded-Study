@@ -150,18 +150,22 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    IST8310_Update();
+
     if (BMI088_IsSampleReady() != 0u)
     {
+      const IST8310_Data_t *mag = NULL;
+
       BMI088_ProcessSample();
       BMI088_GetData(&BMI088_DATA);
-      Attitude_Update(&BMI088_DATA, &MAG_DATA, 0.001f);
-      Attitude_GetData(&ATTITUDE_DATA);
-    }
 
-    if (IST8310_IsSampleReady() != 0u)
-    {
-      IST8310_ProcessSample();
-      IST8310_GetData(&MAG_DATA);
+      if (IST8310_GetValidData(&MAG_DATA) != 0u)
+      {
+        mag = &MAG_DATA;
+      }
+
+      Attitude_Update(&BMI088_DATA, mag, 0.001f);
+      Attitude_GetData(&ATTITUDE_DATA);
     }
 
     /* USER CODE END WHILE */

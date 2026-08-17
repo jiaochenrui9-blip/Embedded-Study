@@ -24,9 +24,13 @@ typedef struct
     int16_t raw[3];
     float mag_uT[3];
     float offset_uT[3];
+
     uint8_t id;
     uint8_t initialized;
-    uint8_t data_ready;
+
+    uint8_t online;
+    uint32_t last_update_tick;
+    uint32_t drdy_wait_start_tick;
 } IST8310_Data_t;
 
 uint8_t IST8310_Init(I2C_HandleTypeDef *hi2c);
@@ -36,7 +40,9 @@ uint8_t IST8310_WriteRegister(uint8_t reg, uint8_t data);
 HAL_StatusTypeDef IST8310_StartSample(void);
 uint8_t IST8310_IsSampleReady(void);
 void IST8310_ProcessSample(void);
+void IST8310_Update(void);
 void IST8310_GetData(IST8310_Data_t *data);
+uint8_t IST8310_GetValidData(IST8310_Data_t *data);
 void IST8310_SetOffset(float x_uT, float y_uT, float z_uT);
 
 void IST8310_DRDY_IRQHandler(void);

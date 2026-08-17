@@ -18,6 +18,8 @@
 #define IST8310_PULSE_NORMAL      0xC0u
 #define IST8310_UT_PER_LSB        0.3f
 #define IST8310_I2C_TIMEOUT_MS    100u
+#define IST8310_DRDY_TIMEOUT_MS   20u
+#define IST8310_OFFLINE_TIMEOUT_MS 50u
 
 static I2C_HandleTypeDef *IST8310_I2C;
 static IST8310_Data_t IST8310_DATA;
@@ -48,6 +50,7 @@ static HAL_StatusTypeDef IST8310_StartTriggerDMA(void)
     if (status != HAL_OK)
     {
         IST8310_STATE = IST8310_STATE_ERROR;
+        IST8310_DATA.online = 0u;
     }
     return status;
 }
@@ -63,6 +66,7 @@ static HAL_StatusTypeDef IST8310_StartDataReadDMA(void)
     if (status != HAL_OK)
     {
         IST8310_STATE = IST8310_STATE_ERROR;
+        IST8310_DATA.online = 0u;
     }
     return status;
 }
@@ -78,7 +82,8 @@ static void IST8310_StoreRaw(const uint8_t buffer[6])
             ((float)IST8310_DATA.raw[i] * IST8310_UT_PER_LSB) -
             IST8310_DATA.offset_uT[i];
     }
-    IST8310_DATA.data_ready = 1u;
+    IST8310_DATA.online = 1u;
+    IST8310_DATA.last_update_tick = HAL_GetTick();
 }
 
 uint8_t IST8310_ReadRegisters(uint8_t reg, uint8_t *data, uint16_t length)
@@ -247,6 +252,27 @@ void IST8310_ProcessSample(void)
     IST8310_SAMPLE_READY = 0u;
 }
 
+void IST8310_Update(void)
+{
+    if (IST8310_SAMPLE_READY != 0u)
+    {
+        IST8310_ProcessSample();
+    }
+
+    if (IST8310_STATE == IST8310_STATE_WAITING_DRDY &&
+        (uint32_t)(HAL_GetTick() - IST8310_DATA.drdy_wait_start_tick) >= IST8310_DRDY_TIMEOUT_MS)
+    {
+        IST8310_STATE = IST8310_STATE_ERROR;
+        IST8310_DATA.online = 0u;
+    }
+
+    if (IST8310_DATA.online != 0u &&
+        (uint32_t)(HAL_GetTick() - IST8310_DATA.last_update_tick) >= IST8310_OFFLINE_TIMEOUT_MS)
+    {
+        IST8310_DATA.online = 0u;
+    }
+}
+
 void IST8310_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c)
 {
     if (hi2c != IST8310_I2C)
@@ -277,6 +303,7 @@ void IST8310_I2C_MemTxCpltCallback(I2C_HandleTypeDef *hi2c)
     if (hi2c == IST8310_I2C && IST8310_STATE == IST8310_STATE_TRIGGERING)
     {
         IST8310_STATE = IST8310_STATE_WAITING_DRDY;
+        IST8310_DATA.drdy_wait_start_tick = HAL_GetTick();
     }
 }
 
@@ -286,6 +313,7 @@ void IST8310_I2C_ErrorCallback(I2C_HandleTypeDef *hi2c)
     {
         IST8310_STATE = IST8310_STATE_ERROR;
         IST8310_SAMPLE_READY = 0u;
+        IST8310_DATA.online = 0u;
     }
 }
 
@@ -295,6 +323,17 @@ void IST8310_GetData(IST8310_Data_t *data)
     {
         *data = IST8310_DATA;
     }
+}
+
+uint8_t IST8310_GetValidData(IST8310_Data_t *data)
+{
+    if (data == NULL || IST8310_DATA.online == 0u)
+    {
+        return 0u;
+    }
+
+    *data = IST8310_DATA;
+    return 1u;
 }
 
 void IST8310_SetOffset(float x_uT, float y_uT, float z_uT)

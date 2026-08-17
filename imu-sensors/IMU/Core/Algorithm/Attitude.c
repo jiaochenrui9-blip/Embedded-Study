@@ -12,6 +12,9 @@
 #define ATTITUDE_KP                2.0f
 #define ATTITUDE_KI                0.02f
 #define ATTITUDE_VECTOR_MIN_NORM   0.000001f
+#define ATTITUDE_ACC_MIN_G         0.8f
+#define ATTITUDE_ACC_MAX_G         1.2f
+#define ATTITUDE_INTEGRAL_LIMIT    0.5f
 
 static Attitude_Data_t ATTITUDE_DATA;
 
@@ -20,16 +23,30 @@ static float Attitude_InvSqrt(float value)
     return 1.0f / sqrtf(value);
 }
 
+static float Attitude_Clamp(float value, float min, float max)
+{
+    if (value < min)
+    {
+        return min;
+    }
+    if (value > max)
+    {
+        return max;
+    }
+    return value;
+}
+
 static void Attitude_UpdateEuler(void)
 {
     const float q0 = ATTITUDE_DATA.q0;
     const float q1 = ATTITUDE_DATA.q1;
     const float q2 = ATTITUDE_DATA.q2;
     const float q3 = ATTITUDE_DATA.q3;
+    const float pitch_sin = Attitude_Clamp(2.0f * (q0 * q2 - q3 * q1), -1.0f, 1.0f);
 
     ATTITUDE_DATA.roll_deg = atan2f(2.0f * (q0 * q1 + q2 * q3),
                                     1.0f - 2.0f * (q1 * q1 + q2 * q2)) * ATTITUDE_DEG_PER_RAD;
-    ATTITUDE_DATA.pitch_deg = asinf(2.0f * (q0 * q2 - q3 * q1)) * ATTITUDE_DEG_PER_RAD;
+    ATTITUDE_DATA.pitch_deg = asinf(pitch_sin) * ATTITUDE_DEG_PER_RAD;
     ATTITUDE_DATA.yaw_deg = atan2f(2.0f * (q0 * q3 + q1 * q2),
                                    1.0f - 2.0f * (q2 * q2 + q3 * q3)) * ATTITUDE_DEG_PER_RAD;
 }
@@ -70,8 +87,9 @@ void Attitude_Update(const BMI088_Data_t *imu, const IST8310_Data_t *mag, float 
     float ey;
     float ez;
     float half_dt;
+    float acc_norm;
 
-    if (imu == NULL || mag == NULL || dt_s <= 0.0f)
+    if (imu == NULL || dt_s <= 0.0f)
     {
         return;
     }
@@ -88,14 +106,12 @@ void Attitude_Update(const BMI088_Data_t *imu, const IST8310_Data_t *mag, float 
     ax = imu->acc_g[0];
     ay = imu->acc_g[1];
     az = imu->acc_g[2];
-    mx = mag->mag_uT[0];
-    my = mag->mag_uT[1];
-    mz = mag->mag_uT[2];
-
     norm_sq = ax * ax + ay * ay + az * az;
-    if (norm_sq > ATTITUDE_VECTOR_MIN_NORM)
+    acc_norm = sqrtf(norm_sq);
+
+    if (acc_norm > ATTITUDE_ACC_MIN_G && acc_norm < ATTITUDE_ACC_MAX_G)
     {
-        const float inv_norm = Attitude_InvSqrt(norm_sq);
+        const float inv_norm = 1.0f / acc_norm;
         ax *= inv_norm;
         ay *= inv_norm;
         az *= inv_norm;
@@ -110,43 +126,61 @@ void Attitude_Update(const BMI088_Data_t *imu, const IST8310_Data_t *mag, float 
         ey = az * vx - ax * vz;
         ez = ax * vy - ay * vx;
 
-        norm_sq = mx * mx + my * my + mz * mz;
-        if (norm_sq > ATTITUDE_VECTOR_MIN_NORM)
+        if (mag != NULL)
         {
-            const float inv_norm = Attitude_InvSqrt(norm_sq);
-            mx *= inv_norm;
-            my *= inv_norm;
-            mz *= inv_norm;
+            mx = mag->mag_uT[0];
+            my = mag->mag_uT[1];
+            mz = mag->mag_uT[2];
 
-            /* 计算水平分量和竖直分量 */
-            hx = 2.0f * mx * (0.5f - q2 * q2 - q3 * q3)
-               + 2.0f * my * (q1 * q2 - q0 * q3)
-               + 2.0f * mz * (q1 * q3 + q0 * q2);
-            hy = 2.0f * mx * (q1 * q2 + q0 * q3)
-               + 2.0f * my * (0.5f - q1 * q1 - q3 * q3)
-               + 2.0f * mz * (q2 * q3 - q0 * q1);
-            bx = sqrtf(hx * hx + hy * hy);
-            bz = 2.0f * mx * (q1 * q3 - q0 * q2)
-               + 2.0f * my * (q2 * q3 + q0 * q1)
-               + 2.0f * mz * (0.5f - q1 * q1 - q2 * q2);
+            norm_sq = mx * mx + my * my + mz * mz;
+            if (norm_sq > ATTITUDE_VECTOR_MIN_NORM)
+            {
+                const float inv_norm = Attitude_InvSqrt(norm_sq);
+                mx *= inv_norm;
+                my *= inv_norm;
+                mz *= inv_norm;
 
-            wx = 2.0f * bx * (0.5f - q2 * q2 - q3 * q3)
-               + 2.0f * bz * (q1 * q3 - q0 * q2);
-            wy = 2.0f * bx * (q1 * q2 - q0 * q3)
-               + 2.0f * bz * (q0 * q1 + q2 * q3);
-            wz = 2.0f * bx * (q0 * q2 + q1 * q3)
-               + 2.0f * bz * (0.5f - q1 * q1 - q2 * q2);
+                /* 计算水平分量和竖直分量 */
+                hx = 2.0f * mx * (0.5f - q2 * q2 - q3 * q3)
+                   + 2.0f * my * (q1 * q2 - q0 * q3)
+                   + 2.0f * mz * (q1 * q3 + q0 * q2);
+                hy = 2.0f * mx * (q1 * q2 + q0 * q3)
+                   + 2.0f * my * (0.5f - q1 * q1 - q3 * q3)
+                   + 2.0f * mz * (q2 * q3 - q0 * q1);
+                bx = sqrtf(hx * hx + hy * hy);
+                bz = 2.0f * mx * (q1 * q3 - q0 * q2)
+                   + 2.0f * my * (q2 * q3 + q0 * q1)
+                   + 2.0f * mz * (0.5f - q1 * q1 - q2 * q2);
 
-            /* 计算误差*/
-            ex += my * wz - mz * wy;
-            ey += mz * wx - mx * wz;
-            ez += mx * wy - my * wx;
+                /*计算预测的磁力计方向*/
+                wx = 2.0f * bx * (0.5f - q2 * q2 - q3 * q3)
+                   + 2.0f * bz * (q1 * q3 - q0 * q2);
+                wy = 2.0f * bx * (q1 * q2 - q0 * q3)
+                   + 2.0f * bz * (q0 * q1 + q2 * q3);
+                wz = 2.0f * bx * (q0 * q2 + q1 * q3)
+                   + 2.0f * bz * (0.5f - q1 * q1 - q2 * q2);
+
+                /* 计算误差*/
+                ex += my * wz - mz * wy;
+                ey += mz * wx - mx * wz;
+                ez += mx * wy - my * wx;
+            }
         }
-
+        /*误差积分*/
         ATTITUDE_DATA.integral_error[0] += ATTITUDE_KI * ex * dt_s;
         ATTITUDE_DATA.integral_error[1] += ATTITUDE_KI * ey * dt_s;
         ATTITUDE_DATA.integral_error[2] += ATTITUDE_KI * ez * dt_s;
+        ATTITUDE_DATA.integral_error[0] = Attitude_Clamp(ATTITUDE_DATA.integral_error[0],
+                                                         -ATTITUDE_INTEGRAL_LIMIT,
+                                                         ATTITUDE_INTEGRAL_LIMIT);
+        ATTITUDE_DATA.integral_error[1] = Attitude_Clamp(ATTITUDE_DATA.integral_error[1],
+                                                         -ATTITUDE_INTEGRAL_LIMIT,
+                                                         ATTITUDE_INTEGRAL_LIMIT);
+        ATTITUDE_DATA.integral_error[2] = Attitude_Clamp(ATTITUDE_DATA.integral_error[2],
+                                                         -ATTITUDE_INTEGRAL_LIMIT,
+                                                         ATTITUDE_INTEGRAL_LIMIT);
 
+        /*修正角速度*/
         gx += ATTITUDE_KP * ex + ATTITUDE_DATA.integral_error[0];
         gy += ATTITUDE_KP * ey + ATTITUDE_DATA.integral_error[1];
         gz += ATTITUDE_KP * ez + ATTITUDE_DATA.integral_error[2];
@@ -156,6 +190,7 @@ void Attitude_Update(const BMI088_Data_t *imu, const IST8310_Data_t *mag, float 
     ATTITUDE_DATA.gyro_corrected_dps[1] = gy * ATTITUDE_DEG_PER_RAD;
     ATTITUDE_DATA.gyro_corrected_dps[2] = gz * ATTITUDE_DEG_PER_RAD;
 
+    /*更新四元数*/
     half_dt = 0.5f * dt_s;
     gx *= half_dt;
     gy *= half_dt;
@@ -166,6 +201,7 @@ void Attitude_Update(const BMI088_Data_t *imu, const IST8310_Data_t *mag, float 
     ATTITUDE_DATA.q2 += q0 * gy - q1 * gz + q3 * gx;
     ATTITUDE_DATA.q3 += q0 * gz + q1 * gy - q2 * gx;
 
+    /*归一化四元数值*/
     norm_sq = ATTITUDE_DATA.q0 * ATTITUDE_DATA.q0 + ATTITUDE_DATA.q1 * ATTITUDE_DATA.q1
             + ATTITUDE_DATA.q2 * ATTITUDE_DATA.q2 + ATTITUDE_DATA.q3 * ATTITUDE_DATA.q3;
     if (norm_sq > ATTITUDE_VECTOR_MIN_NORM)
