@@ -23,8 +23,16 @@ typedef struct
     float integral_error[3];
 } Attitude_Data_t;
 
+typedef struct
+{
+    float acc_g[3];
+    float mag_uT[3];
+} Attitude_StartupAverage_t;
+
 /* The BMI088 and IST8310 axes must both use the same body coordinate system. */
 void Attitude_Init(void);
+uint8_t Attitude_CollectStartupAverage(Attitude_StartupAverage_t *average);
+uint8_t Attitude_InitializeQuaternion(const Attitude_StartupAverage_t *average);
 void Attitude_Update(const BMI088_Data_t *imu, const IST8310_Data_t *mag, float dt_s);
 void Attitude_GetData(Attitude_Data_t *data);
 

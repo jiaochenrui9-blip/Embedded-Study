@@ -59,6 +59,7 @@ UART_HandleTypeDef huart6;
 /* USER CODE BEGIN PV */
 static BMI088_Data_t BMI088_DATA;
 static IST8310_Data_t MAG_DATA;
+static Attitude_StartupAverage_t STARTUP_AVERAGE;
 static Attitude_Data_t ATTITUDE_DATA;
 static uint8_t BMI088_STATUS;
 static uint8_t IST8310_STATUS;
@@ -140,6 +141,16 @@ int main(void)
   Attitude_Init();
 
   if (HAL_TIM_Base_Start_IT(&htim8) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  if (Attitude_CollectStartupAverage(&STARTUP_AVERAGE) == 0u)
+  {
+    Error_Handler();
+  }
+
+  if (Attitude_InitializeQuaternion(&STARTUP_AVERAGE) == 0u)
   {
     Error_Handler();
   }

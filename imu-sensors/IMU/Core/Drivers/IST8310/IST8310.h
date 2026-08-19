@@ -40,7 +40,7 @@ uint8_t IST8310_WriteRegister(uint8_t reg, uint8_t data);
 HAL_StatusTypeDef IST8310_StartSample(void);
 uint8_t IST8310_IsSampleReady(void);
 void IST8310_ProcessSample(void);
-void IST8310_Update(void);
+uint8_t IST8310_Update(void);
 void IST8310_GetData(IST8310_Data_t *data);
 uint8_t IST8310_GetValidData(IST8310_Data_t *data);
 void IST8310_SetOffset(float x_uT, float y_uT, float z_uT);

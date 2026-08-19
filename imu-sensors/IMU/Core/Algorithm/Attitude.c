@@ -15,6 +15,10 @@
 #define ATTITUDE_ACC_MIN_G         0.8f
 #define ATTITUDE_ACC_MAX_G         1.2f
 #define ATTITUDE_INTEGRAL_LIMIT    0.5f
+#define ATTITUDE_MAG_MIN_UT        30.0f
+#define ATTITUDE_MAG_MAX_UT        70.0f
+#define ATTITUDE_MAG_MIN_NORM_SQ   (ATTITUDE_MAG_MIN_UT * ATTITUDE_MAG_MIN_UT)
+#define ATTITUDE_MAG_MAX_NORM_SQ   (ATTITUDE_MAG_MAX_UT * ATTITUDE_MAG_MAX_UT)
 
 static Attitude_Data_t ATTITUDE_DATA;
 
@@ -55,6 +59,150 @@ void Attitude_Init(void)
 {
     memset(&ATTITUDE_DATA, 0, sizeof(ATTITUDE_DATA));
     ATTITUDE_DATA.q0 = 1.0f;
+}
+
+uint8_t Attitude_CollectStartupAverage(Attitude_StartupAverage_t *average)
+{
+    BMI088_Data_t imu;
+    IST8310_Data_t mag;
+    float acc_sum[3] = {0.0f};
+    float mag_sum[3] = {0.0f};
+    uint16_t acc_count = 0u;
+    uint16_t mag_count = 0u;
+
+    if (average == NULL)
+    {
+        return 0u;
+    }
+
+    while ((acc_count < 500u) || (mag_count < 50u))
+    {
+        if (BMI088_IsSampleReady() != 0u)
+        {
+            BMI088_ProcessSample();
+            BMI088_GetData(&imu);
+
+            if (acc_count < 500u)
+            {
+                acc_sum[0] += imu.acc_g[0];
+                acc_sum[1] += imu.acc_g[1];
+                acc_sum[2] += imu.acc_g[2];
+                acc_count++;
+            }
+        }
+
+        if (IST8310_Update() != 0u)
+        {
+            if (IST8310_GetValidData(&mag) != 0u && mag_count < 50u)
+            {
+                mag_sum[0] += mag.mag_uT[0];
+                mag_sum[1] += mag.mag_uT[1];
+                mag_sum[2] += mag.mag_uT[2];
+                mag_count++;
+            }
+        }
+    }
+
+    average->acc_g[0] = acc_sum[0] / (float)acc_count;
+    average->acc_g[1] = acc_sum[1] / (float)acc_count;
+    average->acc_g[2] = acc_sum[2] / (float)acc_count;
+    average->mag_uT[0] = mag_sum[0] / (float)mag_count;
+    average->mag_uT[1] = mag_sum[1] / (float)mag_count;
+    average->mag_uT[2] = mag_sum[2] / (float)mag_count;
+
+    return 1u;
+}
+
+uint8_t Attitude_InitializeQuaternion(const Attitude_StartupAverage_t *average)
+{
+    float ax;
+    float ay;
+    float az;
+    float mx;
+    float my;
+    float mz;
+    float acc_norm;
+    float mag_norm_sq;
+    float roll;
+    float pitch;
+    float yaw;
+    float sin_roll;
+    float cos_roll;
+    float sin_pitch;
+    float cos_pitch;
+    float mag_x_horizontal;
+    float mag_y_horizontal;
+    float half_roll;
+    float half_pitch;
+    float half_yaw;
+    float cos_half_roll;
+    float sin_half_roll;
+    float cos_half_pitch;
+    float sin_half_pitch;
+    float cos_half_yaw;
+    float sin_half_yaw;
+
+    if (average == NULL)
+    {
+        return 0u;
+    }
+
+    ax = average->acc_g[0];
+    ay = average->acc_g[1];
+    az = average->acc_g[2];
+    acc_norm = sqrtf(ax * ax + ay * ay + az * az);
+    if (acc_norm <= ATTITUDE_ACC_MIN_G || acc_norm >= ATTITUDE_ACC_MAX_G)
+    {
+        return 0u;
+    }
+
+    mx = average->mag_uT[0];
+    my = average->mag_uT[1];
+    mz = average->mag_uT[2];
+    mag_norm_sq = mx * mx + my * my + mz * mz;
+    if (mag_norm_sq <= ATTITUDE_MAG_MIN_NORM_SQ ||
+        mag_norm_sq >= ATTITUDE_MAG_MAX_NORM_SQ)
+    {
+        return 0u;
+    }
+
+    ax /= acc_norm;
+    ay /= acc_norm;
+    az /= acc_norm;
+
+    roll = atan2f(ay, az);
+    pitch = atan2f(-ax, sqrtf(ay * ay + az * az));
+    sin_roll = sinf(roll);
+    cos_roll = cosf(roll);
+    sin_pitch = sinf(pitch);
+    cos_pitch = cosf(pitch);
+
+    mag_x_horizontal = mx * cos_pitch + my * sin_roll * sin_pitch + mz * cos_roll * sin_pitch;
+    mag_y_horizontal = my * cos_roll - mz * sin_roll;
+    yaw = atan2f(-mag_y_horizontal, mag_x_horizontal);
+
+    half_roll = 0.5f * roll;
+    half_pitch = 0.5f * pitch;
+    half_yaw = 0.5f * yaw;
+    cos_half_roll = cosf(half_roll);
+    sin_half_roll = sinf(half_roll);
+    cos_half_pitch = cosf(half_pitch);
+    sin_half_pitch = sinf(half_pitch);
+    cos_half_yaw = cosf(half_yaw);
+    sin_half_yaw = sinf(half_yaw);
+
+    Attitude_Init();
+    ATTITUDE_DATA.q0 = cos_half_roll * cos_half_pitch * cos_half_yaw +
+                       sin_half_roll * sin_half_pitch * sin_half_yaw;
+    ATTITUDE_DATA.q1 = sin_half_roll * cos_half_pitch * cos_half_yaw -
+                       cos_half_roll * sin_half_pitch * sin_half_yaw;
+    ATTITUDE_DATA.q2 = cos_half_roll * sin_half_pitch * cos_half_yaw +
+                       sin_half_roll * cos_half_pitch * sin_half_yaw;
+    ATTITUDE_DATA.q3 = cos_half_roll * cos_half_pitch * sin_half_yaw -
+                       sin_half_roll * sin_half_pitch * cos_half_yaw;
+    Attitude_UpdateEuler();
+
+    return 1u;
 }
 
 void Attitude_Update(const BMI088_Data_t *imu, const IST8310_Data_t *mag, float dt_s)
@@ -133,7 +281,8 @@ void Attitude_Update(const BMI088_Data_t *imu, const IST8310_Data_t *mag, float 
             mz = mag->mag_uT[2];
 
             norm_sq = mx * mx + my * my + mz * mz;
-            if (norm_sq > ATTITUDE_VECTOR_MIN_NORM)
+            if (norm_sq > ATTITUDE_MAG_MIN_NORM_SQ &&
+                norm_sq < ATTITUDE_MAG_MAX_NORM_SQ)
             {
                 const float inv_norm = Attitude_InvSqrt(norm_sq);
                 mx *= inv_norm;

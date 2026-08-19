@@ -252,11 +252,14 @@ void IST8310_ProcessSample(void)
     IST8310_SAMPLE_READY = 0u;
 }
 
-void IST8310_Update(void)
+uint8_t IST8310_Update(void)
 {
+    uint8_t updated = 0u;
+
     if (IST8310_SAMPLE_READY != 0u)
     {
         IST8310_ProcessSample();
+        updated = 1u;
     }
 
     if (IST8310_STATE == IST8310_STATE_WAITING_DRDY &&
@@ -271,6 +274,8 @@ void IST8310_Update(void)
     {
         IST8310_DATA.online = 0u;
     }
+
+    return updated;
 }
 
 void IST8310_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c)
